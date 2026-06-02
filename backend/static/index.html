@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Tester — Genshin Calculator</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      margin: 0;
+      padding: 1rem 1.5rem 2rem;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+    h1 { color: #d4a853; margin-top: 0; }
+    h2 {
+      color: #94a3b8;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 0.4rem;
+      margin: 1.5rem 0 0.75rem;
+    }
+    .panel {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.25rem; }
+    input, textarea {
+      width: 100%;
+      max-width: 420px;
+      padding: 0.45rem 0.6rem;
+      margin-bottom: 0.5rem;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      background: #0f172a;
+      color: #f1f5f9;
+      font-family: inherit;
+    }
+    textarea { max-width: 100%; min-height: 80px; font-family: monospace; font-size: 0.85rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+    button {
+      padding: 0.45rem 0.85rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      background: #d4a853;
+      color: #0f172a;
+      font-weight: 600;
+    }
+    button:hover { opacity: 0.9; }
+    button.danger { background: #e94560; color: #fff; }
+    button.secondary { background: #475569; color: #f1f5f9; }
+    #output {
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1rem;
+      min-height: 200px;
+      max-height: 480px;
+      overflow: auto;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 0.82rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #a5f3fc;
+    }
+    .hint { font-size: 0.8rem; color: #64748b; margin-top: 0.25rem; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+    .token-ok { color: #4ade80; font-size: 0.85rem; }
+    .token-no { color: #f87171; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Genshin Calculator — API Tester</h1>
+  <p class="hint">Страница для ручной проверки эндпоинтов. Результат — JSON ниже.</p>
+
+  <div class="panel">
+    <label>Base URL</label>
+    <input id="baseUrl" value="http://127.0.0.1:8000" />
+    <label>JWT Token (заполняется после Register / Login)</label>
+    <input id="token" placeholder="Bearer token..." />
+    <p id="tokenStatus" class="token-no">Не авторизован</p>
+    <div class="row">
+      <div>
+        <label>Email</label>
+        <input id="email" value="test@example.com" />
+      </div>
+      <div>
+        <label>Password</label>
+        <input id="password" type="password" value="secret12" />
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Общее</h2>
+      <div class="row">
+        <button onclick="req('GET', '/health')">Health</button>
+        <button onclick="req('GET', '/')">Root</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Auth</h2>
+      <div class="row">
+        <button onclick="register()">Register</button>
+        <button onclick="login()">Login</button>
+        <button class="secondary" onclick="req('GET', '/api/auth/me', true)">Me</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Catalog (публично)</h2>
+      <div class="row">
+        <button onclick="req('GET', '/api/catalog/characters')">Список персонажей</button>
+        <button onclick="req('GET', '/api/catalog/characters/hu-tao')">Hu Tao</button>
+      </div>
+      <div class="row">
+        <button onclick="req('GET', '/api/catalog/artifact-sets')">Список сетов</button>
+        <button onclick="req('GET', '/api/catalog/artifact-sets/crimson')">Crimson</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Characters</h2>
+      <label>ID персонажа (после Create)</label>
+      <input id="characterId" placeholder="uuid..." />
+      <div class="row">
+        <button onclick="req('GET', '/api/characters', true)">Получить список</button>
+        <button onclick="createCharacter()">Создать</button>
+        <button onclick="req('GET', '/api/characters/' + idVal('characterId'), true)">Получить по ID</button>
+      </div>
+      <div class="row">
+        <button class="secondary" onclick="updateCharacter()">Обновить</button>
+        <button class="danger" onclick="req('DELETE', '/api/characters/' + idVal('characterId'), true)">Удалить</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Teams</h2>
+      <label>ID команды</label>
+      <input id="teamId" placeholder="uuid..." />
+      <div class="row">
+        <button onclick="req('GET', '/api/teams', true)">Получить список</button>
+        <button onclick="createTeam()">Создать</button>
+        <button onclick="req('GET', '/api/teams/' + idVal('teamId'), true)">Получить по ID</button>
+      </div>
+      <div class="row">
+        <button class="secondary" onclick="updateTeam()">Обновить</button>
+        <button class="danger" onclick="req('DELETE', '/api/teams/' + idVal('teamId'), true)">Удалить</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Builds</h2>
+      <label>ID билда</label>
+      <input id="buildId" placeholder="uuid..." />
+      <div class="row">
+        <button onclick="req('GET', '/api/builds', true)">Получить список</button>
+        <button onclick="createBuild()">Создать снимок</button>
+        <button onclick="req('GET', '/api/builds/' + idVal('buildId'), true)">Получить по ID</button>
+        <button class="danger" onclick="req('DELETE', '/api/builds/' + idVal('buildId'), true)">Удалить</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Calculate (без авторизации)</h2>
+      <button onclick="calculateDps()">Рассчитать DPS</button>
+    </section>
+  </div>
+
+  <h2>Результат запроса</h2>
+  <pre id="output">Нажмите кнопку для отправки запроса...</pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function idVal(fieldId) {
+      const v = $(fieldId).value.trim();
+      if (!v) throw new Error('Укажите ID в поле «' + fieldId + '»');
+      return v;
+    }
+
+    function setToken(token) {
+      $('token').value = token;
+      $('tokenStatus').textContent = 'Авторизован ✓';
+      $('tokenStatus').className = 'token-ok';
+    }
+
+    function updateTokenStatus() {
+      const t = $('token').value.trim();
+      $('tokenStatus').textContent = t ? 'Токен задан ✓' : 'Не авторизован';
+      $('tokenStatus').className = t ? 'token-ok' : 'token-no';
+    }
+
+    $('token').addEventListener('input', updateTokenStatus);
+
+    function showResult(meta, data) {
+      $('output').textContent = JSON.stringify(meta, null, 2) + '\n\n' + JSON.stringify(data, null, 2);
+    }
+
+    async function req(method, path, auth = false, body = null) {
+      const url = $('baseUrl').value.replace(/\/$/, '') + path;
+      const headers = { Accept: 'application/json' };
+      if (body) headers['Content-Type'] = 'application/json';
+      if (auth) {
+        const token = $('token').value.trim();
+        if (!token) {
+          showResult({ error: 'Нужен JWT. Сначала Register или Login.' }, null);
+          return;
+        }
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+
+      const meta = { method, url, time: new Date().toISOString() };
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        let data;
+        const text = await res.text();
+        try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
+        meta.status = res.status;
+        meta.ok = res.ok;
+        showResult(meta, data);
+
+        // Автосохранение ID из ответов Create
+        if (res.ok && data && data.id) {
+          if (path.includes('/characters') && method === 'POST') $('characterId').value = data.id;
+          if (path.includes('/teams') && method === 'POST') $('teamId').value = data.id;
+          if (path.includes('/builds') && method === 'POST') $('buildId').value = data.id;
+        }
+        return data;
+      } catch (err) {
+        meta.error = err.message;
+        showResult(meta, null);
+      }
+    }
+
+    async function register() {
+      const data = await req('POST', '/api/auth/register', false, {
+        email: $('email').value,
+        password: $('password').value,
+        display_name: 'Tester',
+      });
+      if (data && data.access_token) setToken(data.access_token);
+    }
+
+    async function login() {
+      const data = await req('POST', '/api/auth/login', false, {
+        email: $('email').value,
+        password: $('password').value,
+      });
+      if (data && data.access_token) setToken(data.access_token);
+    }
+
+    function createCharacter() {
+      req('POST', '/api/characters', true, {
+        game_character_id: 'hu-tao',
+        nickname: 'Test Hu Tao',
+        level: 90,
+        atk_base: 300,
+        atk_bonus: 100,
+        hp: 18000,
+        defense: 800,
+        em: 100,
+        energy_recharge: 120,
+        crit_rate: 60,
+        crit_dmg: 150,
+        constellation: 0,
+        artifacts: {
+          flower: { set_id: 'crimson', main_stat: 'HP', substats: [{ stat: 'CRIT Rate', value: 3.5 }] },
+        },
+      });
+    }
+
+    function updateCharacter() {
+      const cid = idVal('characterId');
+      req('PUT', '/api/characters/' + cid, true, {
+        level: 85,
+        crit_rate: 70,
+        nickname: 'Updated build',
+      });
+    }
+
+    function createTeam() {
+      const charId = $('characterId').value.trim();
+      const members = charId
+        ? [{ user_character_id: charId, slot_index: 0, rotation_order: 1 }]
+        : [];
+      req('POST', '/api/teams', true, {
+        name: 'Test Team',
+        rotation_seconds: 20,
+        members,
+      });
+    }
+
+    function updateTeam() {
+      const tid = idVal('teamId');
+      req('PUT', '/api/teams/' + tid, true, {
+        name: 'Updated Team',
+        rotation_seconds: 25,
+      });
+    }
+
+    function createBuild() {
+      const charId = $('characterId').value.trim();
+      if (!charId) {
+        showResult({ error: 'Сначала создайте персонажа или укажите characterId' }, null);
+        return;
+      }
+      req('POST', '/api/builds', true, {
+        name: 'Build A',
+        source_user_character_id: charId,
+      });
+    }
+
+    function calculateDps() {
+      req('POST', '/api/calculate/dps', false, {
+        atk_base: 300,
+        atk_bonus: 100,
+        crit_rate: 50,
+        crit_dmg: 120,
+        constellation: 2,
+      });
+    }
+  </script>
+</body>
+</html>

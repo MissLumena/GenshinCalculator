@@ -38,6 +38,11 @@ export const ENKA_ICON_NAMES = {
   'lan-yan': 'Lanyan',
   'pulonia': 'Prune',
   'traveler': 'PlayerBoy',
+  skirk: 'SkirkNew',
+  mannequin: 'MannequinBoy',
+  loen: 'Lohen',
+  ororon: 'Olorun',
+  yagoda: 'Jahoda',
 };
 
 function defaultEnkaName(id) {

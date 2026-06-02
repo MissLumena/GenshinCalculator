@@ -2,8 +2,35 @@
  * V2 — общие UI-компоненты: шапка, аватары, карточки, графики.
  */
 import { Link, useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ELEMENT_COLORS, getCharacterIconUrls } from './mockData';
+import { useAppState } from './context';
+
+/* ─── Состояния загрузки и ошибки ─── */
+export function LoadingState({ message = 'Загрузка...' }) {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center px-4 py-12">
+      <p className="text-lg text-genshin-gold">{message}</p>
+    </div>
+  );
+}
+
+export function ErrorState({ message, onRetry }) {
+  return (
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+      <p className="max-w-md text-red-300">{message}</p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded bg-genshin-gold px-4 py-2 text-genshin-dark hover:opacity-90"
+        >
+          Повторить
+        </button>
+      )}
+    </div>
+  );
+}
 
 /* ─── Аватар персонажа (jmp.blue → enka.network fallback) ─── */
 export function CharacterAvatar({ character, size = 'md', className = '' }) {
@@ -58,6 +85,38 @@ const NAV_LINKS = [
 
 export function Header() {
   const { pathname } = useLocation();
+  const {
+    isAuthenticated,
+    authLoading,
+    session,
+    signIn,
+    signUp,
+    signOut,
+    actionLoading,
+  } = useAppState();
+
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState(null);
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      if (authMode === 'signin') {
+        await signIn(email, password);
+      } else {
+        await signUp(email, password);
+      }
+      setAuthOpen(false);
+      setEmail('');
+      setPassword('');
+    } catch (err) {
+      setAuthError(err.message || 'Ошибка авторизации');
+    }
+  };
 
   return (
     <header className="glass-header sticky top-0 z-50">
@@ -65,22 +124,104 @@ export function Header() {
         <Link to="/" className="flex items-center gap-2 text-xl font-bold text-genshin-gold">
           <span>⚔️</span> Genshin Calc
         </Link>
-        <nav className="flex gap-1 sm:gap-4">
-          {NAV_LINKS.map(({ to, label }) => (
-            <Link
-              key={to}
-              to={to}
-              className={`rounded px-3 py-1.5 text-sm transition hover:bg-white/10 ${
-                pathname === to || (to !== '/' && pathname.startsWith(to))
-                  ? 'bg-white/15 text-genshin-gold'
-                  : 'text-gray-200'
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <nav className="flex gap-1 sm:gap-4">
+            {NAV_LINKS.map(({ to, label }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`rounded px-3 py-1.5 text-sm transition hover:bg-white/10 ${
+                  pathname === to || (to !== '/' && pathname.startsWith(to))
+                    ? 'bg-white/15 text-genshin-gold'
+                    : 'text-gray-200'
+                }`}
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+          {!authLoading && (
+            isAuthenticated ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden text-xs text-gray-400 sm:inline">
+                  {session?.user?.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={signOut}
+                  className="rounded px-2 py-1 text-xs text-gray-300 hover:bg-white/10"
+                >
+                  Выйти
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthOpen(true);
+                  setAuthError(null);
+                }}
+                className="rounded px-2 py-1 text-xs text-genshin-gold hover:bg-white/10"
+              >
+                Войти
+              </button>
+            )
+          )}
+        </div>
       </div>
+
+      {authOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="glass-modal w-full max-w-sm p-6">
+            <h3 className="mb-4 text-lg font-semibold text-genshin-gold">
+              {authMode === 'signin' ? 'Вход' : 'Регистрация'}
+            </h3>
+            <form onSubmit={handleAuthSubmit} className="space-y-3">
+              <input
+                type="email"
+                required
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="glass-input w-full px-3 py-2 text-sm"
+              />
+              <input
+                type="password"
+                required
+                minLength={6}
+                placeholder="Пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="glass-input w-full px-3 py-2 text-sm"
+              />
+              {authError && (
+                <p className="text-sm text-red-300">{authError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={actionLoading}
+                className="w-full rounded bg-genshin-gold py-2 font-medium text-genshin-dark hover:opacity-90 disabled:opacity-50"
+              >
+                {actionLoading ? 'Загрузка...' : authMode === 'signin' ? 'Войти' : 'Зарегистрироваться'}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')}
+              className="mt-3 w-full text-sm text-gray-400 hover:text-white"
+            >
+              {authMode === 'signin' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthOpen(false)}
+              className="mt-2 w-full text-sm text-gray-500 hover:text-gray-300"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   );
 }
@@ -130,12 +271,50 @@ export function Tooltip({ text, formula, children }) {
 
 /* ─── Поле ввода с валидацией диапазона ─── */
 export function InputField({ label, value, onChange, min, max, step = 1, suffix = '', tooltip }) {
-  const handleChange = (e) => {
-    let v = parseFloat(e.target.value);
-    if (Number.isNaN(v)) v = min ?? 0;
+  const inputRef = useRef(null);
+  const [text, setText] = useState(() => (value == null ? '' : String(value)));
+
+  useEffect(() => {
+    if (inputRef.current === document.activeElement) return;
+    setText(value == null ? '' : String(value));
+  }, [value]);
+
+  const commitValue = (raw) => {
+    if (raw === '' || raw === '-') {
+      setText('');
+      return;
+    }
+    let v = parseFloat(raw);
+    if (Number.isNaN(v)) return;
     if (min !== undefined) v = Math.max(min, v);
     if (max !== undefined) v = Math.min(max, v);
+    setText(String(v));
     onChange(v);
+  };
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    setText(raw);
+    if (raw === '' || raw === '-') return;
+    const v = parseFloat(raw);
+    if (Number.isNaN(v)) return;
+    let clamped = v;
+    if (min !== undefined) clamped = Math.max(min, clamped);
+    if (max !== undefined) clamped = Math.min(max, clamped);
+    onChange(clamped);
+  };
+
+  const handleBlur = () => {
+    if (text === '' || text === '-') {
+      if (min !== undefined) {
+        setText(String(min));
+        onChange(min);
+      } else {
+        setText('');
+      }
+      return;
+    }
+    commitValue(text);
   };
 
   const field = (
@@ -143,12 +322,14 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
       <span className="mb-1 block text-sm text-gray-400">{label}</span>
       <div className="flex items-center gap-1">
         <input
+          ref={inputRef}
           type="number"
-          value={value}
+          value={text}
           min={min}
           max={max}
           step={step}
           onChange={handleChange}
+          onBlur={handleBlur}
           className="glass-input w-full px-3 py-2"
         />
         {suffix && <span className="text-sm text-gray-400">{suffix}</span>}

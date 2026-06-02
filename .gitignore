@@ -40,7 +40,10 @@ prettier.config.js
 .pwa/
 # Сторонние библиотеки или сгенерированные файлы, например, библиотеки или плагины
 vendor/
-# Ошибки и служебные файлы системы
-*.swp
-*.swo
+# Python backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+*.pyc
 

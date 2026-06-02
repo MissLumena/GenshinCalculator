@@ -71,6 +71,71 @@ export const FORMULAS = {
   setBonus: 'Set Bonus применяется к соответствующему типу урона',
 };
 
+/** Упрощённые поля артефактов (одна панель) */
+export const ARTIFACT_SUMMARY_FIELDS = [
+  { key: 'hp', label: 'HP' },
+  { key: 'critRate', label: 'CRIT Rate' },
+  { key: 'critDmg', label: 'CRIT DMG' },
+  { key: 'atkPercent', label: 'ATK%' },
+  { key: 'em', label: 'EM' },
+];
+
+export function getDefaultArtifacts() {
+  return {
+    set: 'crimson',
+    hp: 0,
+    critRate: 0,
+    critDmg: 0,
+    atkPercent: 0,
+    em: 0,
+  };
+}
+
+/** Слоты БД → упрощённый формат UI */
+export function slotsToSimplified(slots) {
+  if (!slots?.flower) return getDefaultArtifacts();
+
+  const pickStat = (statNames) => {
+    for (const slot of Object.values(slots)) {
+      const sub = slot.substats?.find((s) => statNames.includes(s.stat));
+      if (sub) return sub.value;
+    }
+    return 0;
+  };
+
+  return {
+    set: slots.flower.set || 'crimson',
+    hp: pickStat(['HP']),
+    critRate: pickStat(['CRIT Rate']),
+    critDmg: pickStat(['CRIT DMG']),
+    atkPercent: pickStat(['ATK%']),
+    em: pickStat(['EM']),
+  };
+}
+
+/** Упрощённый формат → слоты для Supabase */
+export function simplifiedToSlots(artifacts) {
+  const set = artifacts.set || 'crimson';
+  const stat = (name, value) => [{ stat: name, value: value ?? 0 }];
+
+  return {
+    flower: { set, mainStat: 'HP', substats: stat('HP', artifacts.hp) },
+    plume: { set, mainStat: 'ATK', substats: stat('CRIT Rate', artifacts.critRate) },
+    sands: { set, mainStat: 'ATK%', substats: stat('CRIT DMG', artifacts.critDmg) },
+    goblet: { set, mainStat: 'ATK%', substats: stat('ATK%', artifacts.atkPercent) },
+    circlet: { set, mainStat: 'CRIT Rate', substats: stat('EM', artifacts.em) },
+  };
+}
+
+/** Поддержка старого формата из localStorage */
+export function normalizeArtifacts(artifacts) {
+  if (artifacts?.set != null && artifacts.hp !== undefined) {
+    return { ...getDefaultArtifacts(), ...artifacts };
+  }
+  if (artifacts?.flower) return slotsToSimplified(artifacts);
+  return getDefaultArtifacts();
+}
+
 /** Дефолтная конфигурация персонажа */
 export function getDefaultConfig(character) {
   return {
@@ -84,13 +149,7 @@ export function getDefaultConfig(character) {
     critDmg: 120,
     energyRecharge: 120,
     constellation: 0,
-    artifacts: {
-      flower: { set: 'crimson', mainStat: 'HP', substats: [{ stat: 'CRIT Rate', value: 3.5 }, { stat: 'CRIT DMG', value: 7.0 }, { stat: 'ATK%', value: 4.1 }, { stat: 'EM', value: 23 }] },
-      plume: { set: 'crimson', mainStat: 'ATK', substats: [{ stat: 'CRIT Rate', value: 3.9 }, { stat: 'CRIT DMG', value: 7.8 }, { stat: 'HP%', value: 5.3 }, { stat: 'ER', value: 5.8 }] },
-      sands: { set: 'crimson', mainStat: 'ATK%', substats: [{ stat: 'CRIT Rate', value: 3.5 }, { stat: 'CRIT DMG', value: 7.0 }, { stat: 'EM', value: 23 }, { stat: 'ATK', value: 16 }] },
-      goblet: { set: 'crimson', mainStat: 'Pyro DMG', substats: [{ stat: 'CRIT Rate', value: 3.5 }, { stat: 'CRIT DMG', value: 7.0 }, { stat: 'ATK%', value: 4.1 }, { stat: 'HP', value: 239 }] },
-      circlet: { set: 'crimson', mainStat: 'CRIT DMG', substats: [{ stat: 'CRIT Rate', value: 3.5 }, { stat: 'ATK%', value: 4.1 }, { stat: 'EM', value: 23 }, { stat: 'DEF', value: 19 }] },
-    },
+    artifacts: getDefaultArtifacts(),
   };
 }
 
@@ -115,14 +174,25 @@ export function calculateMockDps(config, character) {
   };
 }
 
-export function getSetBonuses(artifacts) {
+export function getSetBonuses(artifacts, artifactSets = ARTIFACT_SETS) {
+  const normalized = normalizeArtifacts(artifacts);
+
+  if (normalized.set) {
+    const set = artifactSets.find((s) => s.id === normalized.set);
+    if (!set) return [];
+    return [
+      { set: set.name, text: set.bonus2, pieces: 2 },
+      { set: set.name, text: set.bonus4, pieces: 4 },
+    ];
+  }
+
   const counts = {};
   Object.values(artifacts).forEach((slot) => {
-    counts[slot.set] = (counts[slot.set] || 0) + 1;
+    if (slot?.set) counts[slot.set] = (counts[slot.set] || 0) + 1;
   });
   const bonuses = [];
   Object.entries(counts).forEach(([setId, count]) => {
-    const set = ARTIFACT_SETS.find((s) => s.id === setId);
+    const set = artifactSets.find((s) => s.id === setId);
     if (!set) return;
     if (count >= 2) bonuses.push({ set: set.name, text: set.bonus2, pieces: 2 });
     if (count >= 4) bonuses.push({ set: set.name, text: set.bonus4, pieces: 4 });

@@ -15,20 +15,16 @@ import {
   PieChart,
 } from './components';
 import {
-  CHARACTERS,
-  ARTIFACT_SETS,
-  ARTIFACT_SLOTS,
-  MAIN_STATS,
-  SUBSTAT_OPTIONS,
+  ARTIFACT_SUMMARY_FIELDS,
   CONSTELLATION_DESCRIPTIONS,
   FORMULAS,
   getDefaultConfig,
   getSetBonuses,
   calculateMockDps,
-  findCharacter,
+  normalizeArtifacts,
 } from './mockData';
 import { CHARACTER_REGIONS } from './characters';
-import { useAppState } from './App';
+import { useAppState } from './context';
 
 /* ═══════════════════════════════════════════
    1. Главная страница
@@ -77,16 +73,17 @@ export function HomePage() {
    2. Справочник персонажей — созвездия
    ═══════════════════════════════════════════ */
 export function CharactersPage() {
+  const { characters, findCharacter } = useAppState();
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return CHARACTERS;
+    if (!search.trim()) return characters;
     const q = search.toLowerCase();
-    return CHARACTERS.filter(
+    return characters.filter(
       (c) => c.name.toLowerCase().includes(q) || c.nameRu.toLowerCase().includes(q),
     );
-  }, [search]);
+  }, [search, characters]);
 
   const regionsWithChars = useMemo(() => {
     return CHARACTER_REGIONS.map((region) => ({
@@ -159,15 +156,17 @@ const TABS = [
 export function CharacterSettingsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { savedConfigs, saveConfig } = useAppState();
+  const { savedConfigs, saveConfig, findCharacter, artifactSets, actionLoading } = useAppState();
   const character = findCharacter(id);
   const [tab, setTab] = useState('stats');
   const [config, setConfig] = useState(() => {
-    if (!character) return getDefaultConfig(CHARACTERS[0]);
+    if (!character) return getDefaultConfig({ id: 'unknown', name: '', nameRu: '' });
     const saved = savedConfigs.find((c) => c.characterId === character.id);
-    return saved || getDefaultConfig(character);
+    const base = saved || getDefaultConfig(character);
+    return { ...base, artifacts: normalizeArtifacts(base.artifacts) };
   });
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   if (!character) {
     return (
@@ -178,33 +177,25 @@ export function CharacterSettingsPage() {
     );
   }
 
-  const setBonus = getSetBonuses(config.artifacts);
+  const setBonus = getSetBonuses(config.artifacts, artifactSets);
 
-  const updateArtifact = (slotKey, field, value) => {
+  const updateArtifactField = (field, value) => {
     setConfig((prev) => ({
       ...prev,
-      artifacts: {
-        ...prev.artifacts,
-        [slotKey]: { ...prev.artifacts[slotKey], [field]: value },
-      },
+      artifacts: { ...prev.artifacts, [field]: value },
     }));
   };
 
-  const updateSubstat = (slotKey, idx, field, value) => {
-    setConfig((prev) => {
-      const substats = [...prev.artifacts[slotKey].substats];
-      substats[idx] = { ...substats[idx], [field]: value };
-      return {
-        ...prev,
-        artifacts: { ...prev.artifacts, [slotKey]: { ...prev.artifacts[slotKey], substats } },
-      };
-    });
-  };
-
-  const handleSave = () => {
-    saveConfig(config);
-    setShowSaveModal(false);
-    navigate('/team');
+  const handleSave = async () => {
+    setSaveError(null);
+    try {
+      await saveConfig(config);
+      setShowSaveModal(false);
+      navigate('/team');
+    } catch (err) {
+      setSaveError(err.message || 'Ошибка сохранения');
+      setShowSaveModal(false);
+    }
   };
 
   return (
@@ -281,61 +272,35 @@ export function CharacterSettingsPage() {
       {/* ── Артефакты ── */}
       {tab === 'artifacts' && (
         <div className="space-y-6">
-          {ARTIFACT_SLOTS.map(({ key, label }) => (
-            <div key={key} className="glass-panel-sm p-4">
-              <h3 className="mb-3 font-medium text-genshin-gold">{label}</h3>
-              <div className="mb-3 grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-sm text-gray-400">Сет</span>
-                  <select
-                    value={config.artifacts[key].set}
-                    onChange={(e) => updateArtifact(key, 'set', e.target.value)}
-                    className="select-field w-full"
-                  >
-                    {ARTIFACT_SETS.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-sm text-gray-400">Основной стат</span>
-                  <select
-                    value={config.artifacts[key].mainStat}
-                    onChange={(e) => updateArtifact(key, 'mainStat', e.target.value)}
-                    className="select-field w-full"
-                  >
-                    {MAIN_STATS[key].map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {config.artifacts[key].substats.map((sub, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <select
-                      value={sub.stat}
-                      onChange={(e) => updateSubstat(key, idx, 'stat', e.target.value)}
-                      className="select-field flex-1"
-                    >
-                      {SUBSTAT_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      value={sub.value}
-                      step={0.1}
-                      onChange={(e) => updateSubstat(key, idx, 'value', parseFloat(e.target.value) || 0)}
-                      className="glass-input w-20 px-2 py-1 text-sm"
-                    />
-                  </div>
+          <div className="glass-panel-sm p-4">
+            <label className="mb-4 block">
+              <span className="mb-1 block text-sm text-gray-400">Сет</span>
+              <select
+                value={config.artifacts.set}
+                onChange={(e) => updateArtifactField('set', e.target.value)}
+                className="select-field w-full"
+              >
+                {artifactSets.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
-              </div>
-            </div>
-          ))}
+              </select>
+            </label>
 
-          {/* Бонусы сетов */}
+            <h3 className="mb-3 text-sm font-medium text-gray-400">Основной стат</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {ARTIFACT_SUMMARY_FIELDS.map(({ key, label }) => (
+                <InputField
+                  key={key}
+                  label={label}
+                  value={config.artifacts[key]}
+                  onChange={(v) => updateArtifactField(key, v)}
+                  min={0}
+                  step={0.1}
+                />
+              ))}
+            </div>
+          </div>
+
           {setBonus.length > 0 && (
             <div className="glass-panel-sm border-genshin-gold/30 bg-genshin-gold/10 p-4">
               <h3 className="mb-2 font-medium text-genshin-gold">Бонусы сетов</h3>
@@ -384,6 +349,10 @@ export function CharacterSettingsPage() {
         <ActionButton variant="secondary" onClick={() => navigate('/team')}>Назад к команде</ActionButton>
       </div>
 
+      {saveError && (
+        <p className="mt-4 text-center text-sm text-red-300">{saveError}</p>
+      )}
+
       <ConfirmModal
         open={showSaveModal}
         title="Сохранить персонажа?"
@@ -391,6 +360,9 @@ export function CharacterSettingsPage() {
         onConfirm={handleSave}
         onCancel={() => setShowSaveModal(false)}
       />
+      {actionLoading && (
+        <p className="mt-2 text-center text-sm text-genshin-gold">Загрузка...</p>
+      )}
     </div>
   );
 }
@@ -400,7 +372,16 @@ export function CharacterSettingsPage() {
    ═══════════════════════════════════════════ */
 export function TeamPage() {
   const navigate = useNavigate();
-  const { team, addToTeam, clearTeamSlot, getConfig } = useAppState();
+  const {
+    team,
+    addToTeam,
+    clearTeamSlot,
+    getConfig,
+    characters,
+    findCharacter,
+    actionLoading,
+    isAuthenticated,
+  } = useAppState();
   const [pickerSlot, setPickerSlot] = useState(null);
   const [pickerSearch, setPickerSearch] = useState('');
 
@@ -413,12 +394,12 @@ export function TeamPage() {
   };
 
   const pickerCharacters = useMemo(() => {
-    if (!pickerSearch.trim()) return CHARACTERS;
+    if (!pickerSearch.trim()) return characters;
     const q = pickerSearch.toLowerCase();
-    return CHARACTERS.filter(
+    return characters.filter(
       (c) => c.name.toLowerCase().includes(q) || c.nameRu.toLowerCase().includes(q),
     );
-  }, [pickerSearch]);
+  }, [pickerSearch, characters]);
 
   const pickerRegions = useMemo(() => {
     return CHARACTER_REGIONS.map((region) => ({
@@ -435,7 +416,14 @@ export function TeamPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
       <h1 className="mb-2 text-2xl font-bold text-genshin-gold">Формирование команды</h1>
-      <p className="mb-6 text-sm text-gray-400">Добавьте до 4 персонажей для расчёта DPS</p>
+      <p className="mb-6 text-sm text-gray-400">
+        Добавьте до 4 персонажей для расчёта DPS
+        {!isAuthenticated && ' · Без входа данные сохраняются локально'}
+      </p>
+
+      {actionLoading && (
+        <p className="mb-4 text-center text-sm text-genshin-gold">Загрузка...</p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {[0, 1, 2, 3].map((slotIdx) => {
@@ -550,7 +538,7 @@ export function TeamPage() {
    5. Результаты DPS
    ═══════════════════════════════════════════ */
 export function ResultsPage() {
-  const { team, getConfig } = useAppState();
+  const { team, getConfig, findCharacter } = useAppState();
   const [rotationTime, setRotationTime] = useState(20);
   const [comparison, setComparison] = useState({ a: null, b: null });
 
