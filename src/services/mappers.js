@@ -1,7 +1,7 @@
 /**
  * Преобразование между форматом UI и строками Supabase.
  */
-import { ARTIFACT_SLOTS, slotsToSimplified, simplifiedToSlots, getDefaultArtifacts } from '../mockData';
+import { ARTIFACT_SLOTS, slotsToSimplified, simplifiedToSlots, getDefaultArtifacts, normalizeArtifacts } from '../mockData';
 
 function emptyArtifacts() {
   return simplifiedToSlots(getDefaultArtifacts());
@@ -30,6 +30,23 @@ export function dbArtifactSetToFrontend(row) {
 }
 
 export function dbRowToConfig(row, artifacts = []) {
+  if (row.artifacts_summary && Object.keys(row.artifacts_summary).length > 0) {
+    return {
+      id: row.id,
+      characterId: row.game_character_id,
+      level: row.level,
+      atk: { base: Number(row.atk_base), bonus: Number(row.atk_bonus) },
+      hp: Number(row.hp),
+      def: Number(row.defense),
+      em: Number(row.em),
+      critRate: Number(row.crit_rate),
+      critDmg: Number(row.crit_dmg),
+      energyRecharge: Number(row.energy_recharge),
+      constellation: row.constellation,
+      artifacts: normalizeArtifacts(row.artifacts_summary),
+    };
+  }
+
   const artifactMap = emptyArtifacts();
   for (const artifact of artifacts) {
     artifactMap[artifact.slot] = {
@@ -69,6 +86,7 @@ export function configToDbRow(config, userId) {
     crit_rate: config.critRate,
     crit_dmg: config.critDmg,
     constellation: config.constellation,
+    artifacts_summary: config.artifacts,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   configToDbRow,
   dbRowToConfig,
 } from './mappers';
+import { fetchTeamComposition } from './teamService';
 
 const DEFAULT_TEAM_NAME = 'Основная команда';
 
@@ -56,24 +57,65 @@ export async function fetchUserData(userId) {
     dbRowToConfig(row, artifactsByCharacter[row.id] || []),
   );
 
-  const { data: teamRows, error: teamsError } = await supabase
-    .from('teams')
-    .select('id, name, rotation_seconds')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
-    .limit(1);
+  const { data: profileRow, error: profileError } = await supabase
+    .from('profiles')
+    .select('active_team_id')
+    .eq('id', userId)
+    .maybeSingle();
 
-  if (teamsError) {
-    throw wrapSupabaseError(teamsError, 'Ошибка загрузки команды');
+  if (profileError) {
+    throw wrapSupabaseError(profileError, 'Ошибка загрузки профиля');
   }
 
-  let teamId = teamRows?.[0]?.id ?? null;
-  const team = [null, null, null, null];
+  let teamId = profileRow?.active_team_id ?? null;
+
+  if (teamId) {
+    const { data: activeTeam, error: activeTeamError } = await supabase
+      .from('teams')
+      .select('id')
+      .eq('id', teamId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (activeTeamError) {
+      throw wrapSupabaseError(activeTeamError, 'Ошибка загрузки активной команды');
+    }
+    if (!activeTeam) teamId = null;
+  }
+
+  if (!teamId) {
+    const { data: defaultTeam, error: defaultTeamError } = await supabase
+      .from('teams')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_default', true)
+      .maybeSingle();
+
+    if (defaultTeamError) {
+      throw wrapSupabaseError(defaultTeamError, 'Ошибка загрузки команды по умолчанию');
+    }
+    teamId = defaultTeam?.id ?? null;
+  }
+
+  if (!teamId) {
+    const { data: fallbackTeam, error: fallbackError } = await supabase
+      .from('teams')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (fallbackError) {
+      throw wrapSupabaseError(fallbackError, 'Ошибка загрузки команды');
+    }
+    teamId = fallbackTeam?.id ?? null;
+  }
 
   if (!teamId) {
     const { data: newTeam, error: createTeamError } = await supabase
       .from('teams')
-      .insert({ user_id: userId, name: DEFAULT_TEAM_NAME })
+      .insert({ user_id: userId, name: DEFAULT_TEAM_NAME, is_default: true })
       .select('id')
       .single();
 
@@ -81,27 +123,23 @@ export async function fetchUserData(userId) {
       throw wrapSupabaseError(createTeamError, 'Ошибка создания команды');
     }
     teamId = newTeam.id;
-  } else {
-    const { data: members, error: membersError } = await supabase
-      .from('team_members')
-      .select('slot_index, user_character_id')
-      .eq('team_id', teamId)
-      .order('slot_index');
 
-    if (membersError) {
-      throw wrapSupabaseError(membersError, 'Ошибка загрузки состава команды');
-    }
-
-    const configById = new Map(savedConfigs.map((c) => [c.id, c]));
-    for (const member of members || []) {
-      const config = configById.get(member.user_character_id);
-      if (config && member.slot_index >= 0 && member.slot_index < 4) {
-        team[member.slot_index] = config.characterId;
-      }
-    }
+    await supabase
+      .from('profiles')
+      .update({ active_team_id: teamId })
+      .eq('id', userId);
   }
 
-  return { savedConfigs, team, teamId };
+  const { slots, totalAtk } = await fetchTeamComposition(teamId);
+  const team = slots.map((slot) => slot?.characterId ?? null);
+
+  return {
+    savedConfigs,
+    team,
+    teamId,
+    teamComposition: slots,
+    teamTotalAtk: totalAtk,
+  };
 }
 
 export async function upsertUserCharacter(userId, config) {
@@ -168,7 +206,7 @@ export async function syncTeam(userId, teamId, team, savedConfigs) {
   if (!activeTeamId) {
     const { data: newTeam, error: createError } = await supabase
       .from('teams')
-      .insert({ user_id: userId, name: DEFAULT_TEAM_NAME })
+      .insert({ user_id: userId, name: DEFAULT_TEAM_NAME, is_default: true })
       .select('id')
       .single();
 
@@ -176,6 +214,11 @@ export async function syncTeam(userId, teamId, team, savedConfigs) {
       throw wrapSupabaseError(createError, 'Ошибка создания команды');
     }
     activeTeamId = newTeam.id;
+
+    await supabase
+      .from('profiles')
+      .update({ active_team_id: activeTeamId })
+      .eq('id', userId);
   }
 
   const { error: deleteError } = await supabase

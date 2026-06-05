@@ -50,8 +50,10 @@ CREATE TABLE public.user_characters (
     crit_rate        NUMERIC NOT NULL DEFAULT 5 CHECK (crit_rate >= 0 AND crit_rate <= 100),
     crit_dmg         NUMERIC NOT NULL DEFAULT 50 CHECK (crit_dmg >= 0),
     constellation    SMALLINT NOT NULL DEFAULT 0 CHECK (constellation BETWEEN 0 AND 6),
+    artifacts_summary JSONB NOT NULL DEFAULT '{}'::JSONB,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, game_character_id)
 );
 
 CREATE INDEX idx_user_characters_user_id ON public.user_characters (user_id);
@@ -76,9 +78,14 @@ CREATE TABLE public.teams (
     user_id          UUID NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
     name             TEXT NOT NULL,
     rotation_seconds NUMERIC NOT NULL DEFAULT 20 CHECK (rotation_seconds > 0),
+    is_default       BOOLEAN NOT NULL DEFAULT FALSE,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX idx_teams_one_default_per_user
+    ON public.teams (user_id)
+    WHERE is_default = TRUE;
 
 CREATE INDEX idx_teams_user_id ON public.teams (user_id);
 
@@ -95,6 +102,11 @@ CREATE TABLE public.team_members (
 
 CREATE INDEX idx_team_members_team ON public.team_members (team_id);
 
+ALTER TABLE public.profiles
+    ADD COLUMN active_team_id UUID REFERENCES public.teams (id) ON DELETE SET NULL;
+
+CREATE INDEX idx_profiles_active_team ON public.profiles (active_team_id);
+
 -- Снимок билда для сравнения
 CREATE TABLE public.builds (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,13 +114,16 @@ CREATE TABLE public.builds (
     name                     TEXT NOT NULL,
     game_character_id        TEXT REFERENCES public.game_characters (id),
     source_user_character_id UUID REFERENCES public.user_characters (id) ON DELETE SET NULL,
+    team_id                  UUID REFERENCES public.teams (id) ON DELETE SET NULL,
     snapshot                 JSONB NOT NULL,
     team_snapshot            JSONB,
     calculated_dps           JSONB,
+    rotation_seconds         NUMERIC CHECK (rotation_seconds IS NULL OR rotation_seconds > 0),
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_builds_user_id ON public.builds (user_id);
+CREATE INDEX idx_builds_team_id ON public.builds (team_id);
 
 -- ---------------------------------------------------------------------------
 -- 2. Триггеры: updated_at + профиль при регистрации

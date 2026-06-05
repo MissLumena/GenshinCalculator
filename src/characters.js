@@ -87,6 +87,7 @@ const RAW = [
   ['kirara', 'Kirara', 'Kirara', 'inazuma', 'Dendro', 'Sword', 4],
   ['sangonomiya-kokomi', 'Kokomi', 'Kokomi', 'inazuma', 'Hydro', 'Catalyst', 5],
   // Sumeru
+  ['alhaitham', 'Alhaitham', 'Аль-Хайтам', 'sumeru', 'Dendro', 'Sword', 5],
   ['tighnari', 'Tighnari', 'Tighnari', 'sumeru', 'Dendro', 'Bow', 5],
   ['collei', 'Collei', 'Collei', 'sumeru', 'Dendro', 'Bow', 4],
   ['nilou', 'Nilou', 'Nilou', 'sumeru', 'Hydro', 'Sword', 5],

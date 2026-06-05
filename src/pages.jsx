@@ -18,6 +18,7 @@ import {
   ARTIFACT_SUMMARY_FIELDS,
   CONSTELLATION_DESCRIPTIONS,
   FORMULAS,
+  ELEMENT_COLORS,
   getDefaultConfig,
   getSetBonuses,
   calculateMockDps,
@@ -32,38 +33,35 @@ import { useAppState } from './context';
 export function HomePage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 text-center">
-      <h1 className="mb-4 text-4xl font-bold text-genshin-gold">Genshin Impact Calculator</h1>
+      <h1 className="font-display mb-4 text-4xl font-bold text-genshin-goldbright">
+        Genshin Impact Calculator
+      </h1>
       <p className="mb-8 text-lg text-gray-300">
-        Рассчитывайте DPS персонажей, настраивайте артефакты и создавайте оптимальные команды.
-        Сравнивайте билды и находите лучшие ротации для вашего аккаунта.
+        Рассчитывайте DPS, настраивайте артефакты и собирайте команду из четырёх персонажей.
       </p>
 
       <div className="mb-12 grid gap-4 sm:grid-cols-3">
         {[
-          { to: '/team', icon: '⚔️', label: 'Начать расчёт', desc: 'Соберите команду' },
-          { to: '/characters', icon: '📖', label: 'Персонажи', desc: 'Созвездия и описания' },
-          { to: '/team', icon: '👥', label: 'Мои команды', desc: 'Сборка отряда' },
-        ].map(({ to, icon, label, desc }) => (
+          { to: '/team', label: 'Начать расчёт', desc: 'Соберите команду' },
+          { to: '/characters', label: 'Персонажи', desc: 'Созвездия и описания' },
+          { to: '/team', label: 'Мои команды', desc: 'Сборка отряда' },
+        ].map(({ to, label, desc }) => (
           <Link
             key={label}
             to={to}
             className="glass-panel p-6 transition hover:border-genshin-gold hover:shadow-lg"
           >
-            <span className="text-3xl">{icon}</span>
-            <h2 className="mt-3 text-lg font-semibold text-genshin-gold">{label}</h2>
-            <p className="mt-1 text-sm text-gray-400">{desc}</p>
+            <h2 className="text-lg font-semibold text-white">{label}</h2>
+            <p className="mt-2 text-sm text-gray-400">{desc}</p>
           </Link>
         ))}
       </div>
 
       <section className="glass-panel p-6 text-left">
-        <h2 className="mb-3 text-xl font-semibold text-genshin-gold">Возможности</h2>
-        <ul className="grid gap-2 text-gray-300 sm:grid-cols-2">
-          <li>✦ Настройка статов, артефактов и созвездий</li>
-          <li>✦ Расчёт урона автоатаки, скилла и взрыва стихии</li>
-          <li>✦ Формирование команды из 4 персонажей</li>
-          <li>✦ Сравнение двух билдов side-by-side</li>
-        </ul>
+        <h2 className="mb-2 text-xl font-semibold text-white">Возможности</h2>
+        <p className="text-gray-300">
+          Настройка билдов, расчёт урона и сравнение команд — всё необходимое для оптимизации отряда.
+        </p>
       </section>
     </div>
   );
@@ -374,24 +372,19 @@ export function TeamPage() {
   const navigate = useNavigate();
   const {
     team,
+    teamComposition,
+    teamTotalAtk,
     addToTeam,
     clearTeamSlot,
-    getConfig,
     characters,
-    findCharacter,
     actionLoading,
+    userDataLoading,
     isAuthenticated,
   } = useAppState();
   const [pickerSlot, setPickerSlot] = useState(null);
   const [pickerSearch, setPickerSearch] = useState('');
 
   const teamIds = useMemo(() => new Set(team.filter(Boolean)), [team]);
-
-  const getCharForSlot = (characterId) => {
-    const char = findCharacter(characterId);
-    const config = getConfig(characterId);
-    return char && config ? { config, char } : null;
-  };
 
   const pickerCharacters = useMemo(() => {
     if (!pickerSearch.trim()) return characters;
@@ -415,34 +408,51 @@ export function TeamPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
-      <h1 className="mb-2 text-2xl font-bold text-genshin-gold">Формирование команды</h1>
+      <h1 className="mb-2 text-2xl font-bold text-genshin-gold">Сборка команды</h1>
       <p className="mb-6 text-sm text-gray-400">
         Добавьте до 4 персонажей для расчёта DPS
         {!isAuthenticated && ' · Без входа данные сохраняются локально'}
       </p>
 
-      {actionLoading && (
+      {(actionLoading || userDataLoading) && (
         <p className="mb-4 text-center text-sm text-genshin-gold">Загрузка...</p>
+      )}
+
+      {teamTotalAtk > 0 && (
+        <div className="glass-panel-sm mb-6 flex items-center justify-between px-4 py-3">
+          <span className="text-sm text-gray-400">Суммарный ATK команды</span>
+          <span className="text-xl font-bold text-genshin-gold">{teamTotalAtk.toLocaleString()}</span>
+        </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {[0, 1, 2, 3].map((slotIdx) => {
-          const data = team[slotIdx] ? getCharForSlot(team[slotIdx]) : null;
+          const slot = teamComposition[slotIdx];
 
           return (
             <div
               key={slotIdx}
               className="glass-panel flex min-h-[180px] flex-col items-center justify-center border-2 border-dashed border-white/25 p-4"
             >
-              {data ? (
+              {slot ? (
                 <>
-                  <CharacterAvatar character={data.char} size="lg" />
-                  <p className="mt-2 font-semibold">{data.char.nameRu}</p>
-                  <p className="text-sm text-gray-400">Lv. {data.config.level} · C{data.config.constellation}</p>
+                  <CharacterAvatar character={slot.char} size="lg" />
+                  <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                    <p className="font-semibold">{slot.nameRu}</p>
+                    <span className="rounded bg-genshin-gold/20 px-2 py-0.5 text-xs font-bold text-genshin-gold">
+                      C{slot.constellation}
+                    </span>
+                  </div>
+                  <span className={`mt-1 rounded px-2 py-0.5 text-xs text-white ${ELEMENT_COLORS[slot.element] || 'bg-gray-500'}`}>
+                    {slot.element}
+                  </span>
+                  <p className="mt-1 text-sm text-gray-400">
+                    ATK {slot.atk.toLocaleString()} · Lv. {slot.level}
+                  </p>
                   <div className="mt-3 flex gap-3">
                     <button
                       type="button"
-                      onClick={() => navigate(`/character/${data.char.id}`)}
+                      onClick={() => navigate(`/character/${slot.characterId}`)}
                       className="text-xs text-genshin-gold hover:underline"
                     >
                       Настроить

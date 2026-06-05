@@ -14,7 +14,7 @@ export const JMP_SLUGS = new Set([
   'sara', 'sayu', 'sethos', 'shenhe', 'shikanoin-heizou', 'sigewinne', 'sucrose',
   'tartaglia', 'thoma', 'tighnari', 'traveler-anemo', 'venti', 'wanderer', 'xiangling',
   'xianyun', 'xiao', 'xingqiu', 'xinyan', 'yae-miko', 'yanfei', 'yaoyao', 'yelan',
-  'yoimiya', 'yun-jin', 'zhongli',
+  'yoimiya', 'yun-jin', 'zhongli', 'alhaitham',
 ]);
 
 /** id персонажа → slug на jmp.blue (если отличается от id) */
@@ -38,6 +38,7 @@ export const ENKA_ICON_NAMES = {
   'lan-yan': 'Lanyan',
   'pulonia': 'Prune',
   'traveler': 'PlayerBoy',
+  'alhaitham': 'Alhatham',
   skirk: 'SkirkNew',
   mannequin: 'MannequinBoy',
   loen: 'Lohen',

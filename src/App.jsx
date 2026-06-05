@@ -33,6 +33,10 @@ import {
   onAuthStateChange,
   getInitialSession,
 } from './services/userDataService';
+import {
+  fetchTeamComposition,
+  buildLocalTeamComposition,
+} from './services/teamService';
 
 const STORAGE_KEY = 'genshin-calc-v2';
 
@@ -72,6 +76,8 @@ export default function App() {
   const [savedConfigs, setSavedConfigs] = useState(() => loadLocalState().savedConfigs);
   const [team, setTeam] = useState(() => loadLocalState().team);
   const [teamId, setTeamId] = useState(null);
+  const [teamComposition, setTeamComposition] = useState([null, null, null, null]);
+  const [teamTotalAtk, setTeamTotalAtk] = useState(0);
 
   const isAuthenticated = Boolean(session?.user);
 
@@ -162,6 +168,8 @@ export default function App() {
           setSavedConfigs(data.savedConfigs);
           setTeam(data.team);
           setTeamId(data.teamId);
+          setTeamComposition(data.teamComposition);
+          setTeamTotalAtk(data.teamTotalAtk);
         }
       } catch (err) {
         if (!cancelled) {
@@ -175,6 +183,34 @@ export default function App() {
     loadUserData();
     return () => { cancelled = true; };
   }, [session?.user?.id, authLoading]);
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (isAuthenticated && teamId) {
+      let cancelled = false;
+      fetchTeamComposition(teamId)
+        .then(({ slots, totalAtk }) => {
+          if (!cancelled) {
+            setTeamComposition(slots);
+            setTeamTotalAtk(totalAtk);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            const local = buildLocalTeamComposition(team, savedConfigs, findCharacter);
+            setTeamComposition(local.slots);
+            setTeamTotalAtk(local.totalAtk);
+          }
+        });
+      return () => { cancelled = true; };
+    }
+
+    const local = buildLocalTeamComposition(team, savedConfigs, findCharacter);
+    setTeamComposition(local.slots);
+    setTeamTotalAtk(local.totalAtk);
+    return undefined;
+  }, [team, teamId, savedConfigs, findCharacter, isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (!isAuthenticated && !authLoading) {
@@ -358,6 +394,8 @@ export default function App() {
     findCharacter,
     savedConfigs,
     team,
+    teamComposition,
+    teamTotalAtk,
     saveConfig,
     setTeamSlot,
     clearTeamSlot,
@@ -382,6 +420,8 @@ export default function App() {
     findCharacter,
     savedConfigs,
     team,
+    teamComposition,
+    teamTotalAtk,
     saveConfig,
     setTeamSlot,
     clearTeamSlot,
