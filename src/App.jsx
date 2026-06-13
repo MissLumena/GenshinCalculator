@@ -17,6 +17,7 @@ import {
   CharacterSettingsPage,
   TeamPage,
   ResultsPage,
+  UserResultsPage,
 } from './pages';
 
 import { getDefaultConfig, normalizeArtifacts } from './mockData';
@@ -27,18 +28,33 @@ import {
   fetchUserData,
   upsertUserCharacter,
   syncTeam,
+} from './services/userDataService';
+import {
   signIn,
   signUp,
   signOut,
   onAuthStateChange,
   getInitialSession,
-} from './services/userDataService';
+  fetchMyProfile,
+  claimOwnerRole,
+  updateDisplayName as saveDisplayName,
+} from './services/authService';
+import { ROLES } from './lib/permissions';
+import { toApiError } from './lib/apiErrors';
 import {
   fetchTeamComposition,
   buildLocalTeamComposition,
 } from './services/teamService';
 
 const STORAGE_KEY = 'genshin-calc-v2';
+
+function formatErrorMessage(err) {
+  const apiError = toApiError(err);
+  if (apiError.status === 400 || apiError.status === 403) {
+    return `[${apiError.status}] ${apiError.message}`;
+  }
+  return apiError.message;
+}
 
 export { useAppState } from './context';
 
@@ -66,6 +82,7 @@ export default function App() {
   const [artifactSets, setArtifactSets] = useState([]);
 
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [userDataLoading, setUserDataLoading] = useState(false);
@@ -80,6 +97,19 @@ export default function App() {
   const [teamTotalAtk, setTeamTotalAtk] = useState(0);
 
   const isAuthenticated = Boolean(session?.user);
+  const userRole = profile?.role ?? ROLES.USER;
+
+  const loadProfile = useCallback(async () => {
+    try {
+      await claimOwnerRole().catch(() => {});
+      const nextProfile = await fetchMyProfile();
+      setProfile(nextProfile);
+      return nextProfile;
+    } catch {
+      setProfile(null);
+      return null;
+    }
+  }, []);
 
   const findCharacter = useCallback(
     (characterId) => characters.find((c) => c.id === characterId) || findCharacterById(characterId),
@@ -108,7 +138,7 @@ export default function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          setCatalogError(err.message || 'Не удалось загрузить справочники');
+          setCatalogError(formatErrorMessage(err));
         }
       } finally {
         if (!cancelled) setCatalogLoading(false);
@@ -126,24 +156,39 @@ export default function App() {
       setAuthLoading(true);
       try {
         const initialSession = await getInitialSession();
-        if (!cancelled) setSession(initialSession);
+        if (!cancelled) {
+          setSession(initialSession);
+          if (initialSession?.user) {
+            await loadProfile();
+          } else {
+            setProfile(null);
+          }
+        }
       } catch {
-        if (!cancelled) setSession(null);
+        if (!cancelled) {
+          setSession(null);
+          setProfile(null);
+        }
       } finally {
         if (!cancelled) setAuthLoading(false);
       }
     }
 
     initAuth();
-    const unsubscribe = onAuthStateChange((nextSession) => {
+    const unsubscribe = onAuthStateChange(async (nextSession) => {
       setSession(nextSession);
+      if (nextSession?.user) {
+        await loadProfile();
+      } else {
+        setProfile(null);
+      }
     });
 
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [loadProfile]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -163,7 +208,7 @@ export default function App() {
       setUserDataLoading(true);
       setUserDataError(null);
       try {
-        const data = await fetchUserData(session.user.id);
+        const data = await fetchUserData(session.user.id, session.user.id, userRole);
         if (!cancelled) {
           setSavedConfigs(data.savedConfigs);
           setTeam(data.team);
@@ -173,7 +218,7 @@ export default function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          setUserDataError(err.message || 'Не удалось загрузить данные пользователя');
+          setUserDataError(formatErrorMessage(err));
         }
       } finally {
         if (!cancelled) setUserDataLoading(false);
@@ -182,7 +227,7 @@ export default function App() {
 
     loadUserData();
     return () => { cancelled = true; };
-  }, [session?.user?.id, authLoading]);
+  }, [session?.user?.id, authLoading, userRole]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -220,8 +265,15 @@ export default function App() {
 
   const persistTeam = useCallback(async (nextTeam, configs, currentTeamId) => {
     if (!session?.user) return currentTeamId;
-    return syncTeam(session.user.id, currentTeamId, nextTeam, configs);
-  }, [session?.user]);
+    return syncTeam(
+      session.user.id,
+      currentTeamId,
+      nextTeam,
+      configs,
+      session.user.id,
+      userRole,
+    );
+  }, [session?.user, userRole]);
 
   const saveConfig = useCallback(async (config) => {
     setActionError(null);
@@ -229,7 +281,12 @@ export default function App() {
     if (session?.user) {
       setActionLoading(true);
       try {
-        const saved = await upsertUserCharacter(session.user.id, config);
+        const saved = await upsertUserCharacter(
+          session.user.id,
+          config,
+          userRole,
+          session.user.id,
+        );
         setSavedConfigs((prev) => {
           const idx = prev.findIndex((c) => c.characterId === saved.characterId);
           if (idx >= 0) {
@@ -241,7 +298,7 @@ export default function App() {
         });
         return saved;
       } catch (err) {
-        setActionError(err.message || 'Ошибка сохранения');
+        setActionError(formatErrorMessage(err));
         throw err;
       } finally {
         setActionLoading(false);
@@ -258,7 +315,7 @@ export default function App() {
       return [...prev, config];
     });
     return config;
-  }, [session?.user]);
+  }, [session?.user, userRole]);
 
   const setTeamSlot = useCallback(async (slotIdx, characterId) => {
     setActionError(null);
@@ -271,7 +328,7 @@ export default function App() {
         const newTeamId = await persistTeam(nextTeam, savedConfigs, teamId);
         setTeamId(newTeamId);
       } catch (err) {
-        setActionError(err.message || 'Ошибка обновления команды');
+        setActionError(formatErrorMessage(err));
       }
     }
   }, [team, savedConfigs, teamId, session?.user, persistTeam]);
@@ -287,7 +344,7 @@ export default function App() {
         const newTeamId = await persistTeam(nextTeam, savedConfigs, teamId);
         setTeamId(newTeamId);
       } catch (err) {
-        setActionError(err.message || 'Ошибка обновления команды');
+        setActionError(formatErrorMessage(err));
       }
     }
   }, [team, savedConfigs, teamId, session?.user, persistTeam]);
@@ -315,11 +372,16 @@ export default function App() {
       if (session?.user) {
         setActionLoading(true);
         try {
-          const saved = await upsertUserCharacter(session.user.id, defaultConfig);
+          const saved = await upsertUserCharacter(
+            session.user.id,
+            defaultConfig,
+            userRole,
+            session.user.id,
+          );
           configs = [...savedConfigs, saved];
           setSavedConfigs(configs);
         } catch (err) {
-          setActionError(err.message || 'Ошибка добавления персонажа');
+          setActionError(formatErrorMessage(err));
           setActionLoading(false);
           return;
         }
@@ -339,10 +401,10 @@ export default function App() {
         const newTeamId = await persistTeam(nextTeam, configs, teamId);
         setTeamId(newTeamId);
       } catch (err) {
-        setActionError(err.message || 'Ошибка обновления команды');
+        setActionError(formatErrorMessage(err));
       }
     }
-  }, [findCharacter, savedConfigs, session?.user, team, teamId, persistTeam]);
+  }, [findCharacter, savedConfigs, session?.user, userRole, team, teamId, persistTeam]);
 
   const handleSignIn = useCallback(async (email, password) => {
     setActionError(null);
@@ -350,13 +412,14 @@ export default function App() {
     try {
       const nextSession = await signIn(email, password);
       setSession(nextSession);
+      await loadProfile();
     } catch (err) {
-      setActionError(err.message || 'Ошибка входа');
+      setActionError(formatErrorMessage(err));
       throw err;
     } finally {
       setActionLoading(false);
     }
-  }, []);
+  }, [loadProfile]);
 
   const handleSignUp = useCallback(async (email, password) => {
     setActionError(null);
@@ -364,27 +427,36 @@ export default function App() {
     try {
       const nextSession = await signUp(email, password);
       setSession(nextSession);
+      await loadProfile();
     } catch (err) {
-      setActionError(err.message || 'Ошибка регистрации');
+      setActionError(formatErrorMessage(err));
       throw err;
     } finally {
       setActionLoading(false);
     }
-  }, []);
+  }, [loadProfile]);
 
   const handleSignOut = useCallback(async () => {
     setActionError(null);
     try {
       await signOut();
       setSession(null);
+      setProfile(null);
       const local = loadLocalState();
       setSavedConfigs(local.savedConfigs);
       setTeam(local.team);
       setTeamId(null);
     } catch (err) {
-      setActionError(err.message || 'Ошибка выхода');
+      setActionError(formatErrorMessage(err));
     }
   }, []);
+
+  const handleUpdateDisplayName = useCallback(async (displayName) => {
+    setActionError(null);
+    const saved = await saveDisplayName(displayName);
+    await loadProfile();
+    return saved;
+  }, [loadProfile]);
 
   const value = useMemo(() => ({
     characters,
@@ -402,6 +474,8 @@ export default function App() {
     getConfig,
     addToTeam,
     session,
+    profile,
+    userRole,
     isAuthenticated,
     authLoading,
     userDataLoading,
@@ -411,6 +485,7 @@ export default function App() {
     signIn: handleSignIn,
     signUp: handleSignUp,
     signOut: handleSignOut,
+    updateDisplayName: handleUpdateDisplayName,
     clearActionError: () => setActionError(null),
   }), [
     characters,
@@ -428,6 +503,8 @@ export default function App() {
     getConfig,
     addToTeam,
     session,
+    profile,
+    userRole,
     isAuthenticated,
     authLoading,
     userDataLoading,
@@ -437,6 +514,7 @@ export default function App() {
     handleSignIn,
     handleSignUp,
     handleSignOut,
+    handleUpdateDisplayName,
   ]);
 
   if (catalogLoading) {
@@ -489,6 +567,7 @@ export default function App() {
           <Route path="/character/:id" element={<CharacterSettingsPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/results" element={<ResultsPage />} />
+          <Route path="/results/:userId" element={<UserResultsPage />} />
         </Routes>
       </main>
     </AppContext.Provider>

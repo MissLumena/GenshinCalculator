@@ -16,8 +16,8 @@ export function SimpleHeader() {
   return (
     <header className="glass-header sticky top-0 z-50">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link to="/" className="flex items-center gap-2 text-xl font-bold text-genshin-gold">
-          <span>⚔️</span> Genshin Calc
+        <Link to="/" className="flex items-center text-xl text-genshin-gold" aria-label="На главную">
+          <span>⚔️</span>
         </Link>
         <nav className="flex gap-1 sm:gap-4">
           {NAV_LINKS.map(({ to, label }) => (

@@ -2,13 +2,13 @@
  * Загрузка состава команды с join user_characters → game_characters.
  */
 import { getSupabaseClient } from '../lib/supabase';
+import { fromSupabaseError } from '../lib/apiErrors';
 import { dbCharacterToFrontend } from './mappers';
 
 const EMPTY_SLOTS = [null, null, null, null];
 
-function wrapSupabaseError(error, context) {
-  const message = error?.message || 'Неизвестная ошибка Supabase';
-  return new Error(`${context}: ${message}`);
+function wrapError(error, context) {
+  return fromSupabaseError(error, context);
 }
 
 /** ATK одного персонажа = atk_base + atk_bonus */
@@ -131,7 +131,7 @@ export async function fetchTeamComposition(teamId, findCharacter) {
     .order('slot_index');
 
   if (error) {
-    throw wrapSupabaseError(error, 'Ошибка загрузки состава команды');
+    throw wrapError(error, 'Ошибка загрузки состава команды');
   }
 
   return buildTeamComposition(data, findCharacter);

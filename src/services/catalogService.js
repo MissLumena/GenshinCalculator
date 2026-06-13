@@ -2,6 +2,7 @@
  * Загрузка справочников game_characters и artifact_sets из Supabase.
  */
 import { getSupabaseClient } from '../lib/supabase';
+import { fromSupabaseError } from '../lib/apiErrors';
 import { CHARACTERS } from '../characters';
 import { ARTIFACT_SETS as LOCAL_ARTIFACT_SETS } from '../mockData';
 import {
@@ -10,9 +11,8 @@ import {
   mergeCharacters,
 } from './mappers';
 
-function wrapSupabaseError(error, context) {
-  const message = error?.message || 'Неизвестная ошибка Supabase';
-  return new Error(`${context}: ${message}`);
+function wrapError(error, context) {
+  return fromSupabaseError(error, context);
 }
 
 export async function fetchCatalog() {
@@ -31,10 +31,10 @@ export async function fetchCatalog() {
   ]);
 
   if (charactersResult.error) {
-    throw wrapSupabaseError(charactersResult.error, 'Ошибка загрузки персонажей');
+    throw wrapError(charactersResult.error, 'Ошибка загрузки персонажей');
   }
   if (artifactSetsResult.error) {
-    throw wrapSupabaseError(artifactSetsResult.error, 'Ошибка загрузки сетов артефактов');
+    throw wrapError(artifactSetsResult.error, 'Ошибка загрузки сетов артефактов');
   }
 
   const dbCharacters = (charactersResult.data || []).map(dbCharacterToFrontend);

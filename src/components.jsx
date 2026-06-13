@@ -3,8 +3,12 @@
  */
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ELEMENT_COLORS, getCharacterIconUrls } from './mockData';
 import { useAppState } from './context';
+import { validateAuthCredentials } from './lib/validation';
+import { getRoleLabel } from './lib/permissions';
+import { formatDisplayName, validateDisplayName } from './lib/displayName';
 
 /* ─── Состояния загрузки и ошибки ─── */
 export function LoadingState({ message = 'Загрузка...' }) {
@@ -89,40 +93,85 @@ export function Header() {
     isAuthenticated,
     authLoading,
     session,
+    profile,
+    userRole,
     signIn,
     signUp,
     signOut,
     actionLoading,
+    updateDisplayName,
   } = useAppState();
 
   const [authOpen, setAuthOpen] = useState(false);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [nameError, setNameError] = useState(null);
+  const [nameSaving, setNameSaving] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [authError, setAuthError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError(null);
+    setFieldErrors({});
+
+    const validated = validateAuthCredentials(email, password);
+    if ('error' in validated) {
+      setAuthError(validated.error);
+      return;
+    }
+
+    if (authMode === 'signup' && password !== confirmPassword) {
+      setFieldErrors({ confirmPassword: 'Пароли не совпадают' });
+      return;
+    }
+
     try {
       if (authMode === 'signin') {
-        await signIn(email, password);
+        await signIn(validated.email, validated.password);
       } else {
-        await signUp(email, password);
+        await signUp(validated.email, validated.password);
       }
       setAuthOpen(false);
       setEmail('');
       setPassword('');
+      setConfirmPassword('');
     } catch (err) {
       setAuthError(err.message || 'Ошибка авторизации');
     }
   };
 
+  const handleNameSave = async (e) => {
+    e.preventDefault();
+    setNameError(null);
+    const validationError = validateDisplayName(nameInput);
+    if (validationError) {
+      setNameError(validationError);
+      return;
+    }
+    if (!updateDisplayName) return;
+    setNameSaving(true);
+    try {
+      await updateDisplayName(nameInput.trim());
+      setNameOpen(false);
+    } catch (err) {
+      setNameError(err.message || 'Ошибка сохранения имени');
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  const publicName = formatDisplayName(profile?.displayName);
+
   return (
     <header className="glass-header sticky top-0 z-50">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link to="/" className="flex items-center gap-2 text-xl font-bold text-genshin-gold">
-          <span>⚔️</span> Genshin Calc
+        <Link to="/" className="flex items-center text-xl text-genshin-gold" aria-label="На главную">
+          <span>⚔️</span>
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <nav className="flex gap-1 sm:gap-4">
@@ -143,8 +192,20 @@ export function Header() {
           {!authLoading && (
             isAuthenticated ? (
               <div className="flex items-center gap-2">
-                <span className="hidden text-xs text-gray-400 sm:inline">
-                  {session?.user?.email}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNameInput(publicName === 'Игрок' ? '' : publicName);
+                    setNameError(null);
+                    setNameOpen(true);
+                  }}
+                  className="max-w-[100px] truncate text-xs text-gray-300 hover:text-white sm:max-w-[120px]"
+                  title="Изменить имя"
+                >
+                  {publicName}
+                </button>
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-genshin-gold">
+                  {getRoleLabel(userRole)}
                 </span>
                 <button
                   type="button"
@@ -170,30 +231,64 @@ export function Header() {
         </div>
       </div>
 
-      {authOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="glass-modal w-full max-w-sm p-6">
-            <h3 className="mb-4 text-lg font-semibold text-genshin-gold">
+      {authOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          role="presentation"
+          onClick={() => setAuthOpen(false)}
+          onKeyDown={(e) => e.key === 'Escape' && setAuthOpen(false)}
+        >
+          <div
+            className="glass-modal relative z-[201] w-full max-w-sm p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="auth-modal-title" className="mb-4 text-lg font-semibold text-genshin-gold">
               {authMode === 'signin' ? 'Вход' : 'Регистрация'}
             </h3>
             <form onSubmit={handleAuthSubmit} className="space-y-3">
-              <input
-                type="email"
-                required
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="glass-input w-full px-3 py-2 text-sm"
-              />
-              <input
-                type="password"
-                required
-                minLength={6}
-                placeholder="Пароль"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="glass-input w-full px-3 py-2 text-sm"
-              />
+              <div>
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="glass-input w-full px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'}
+                  placeholder="Пароль (мин. 8 символов, буква и цифра)"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="glass-input w-full px-3 py-2 text-sm"
+                />
+              </div>
+              {authMode === 'signup' && (
+                <div>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                    placeholder="Подтвердите пароль"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="glass-input w-full px-3 py-2 text-sm"
+                  />
+                  {fieldErrors.confirmPassword && (
+                    <p className="mt-1 text-xs text-red-300">{fieldErrors.confirmPassword}</p>
+                  )}
+                </div>
+              )}
               {authError && (
                 <p className="text-sm text-red-300">{authError}</p>
               )}
@@ -207,7 +302,12 @@ export function Header() {
             </form>
             <button
               type="button"
-              onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')}
+              onClick={() => {
+                setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+                setAuthError(null);
+                setFieldErrors({});
+                setConfirmPassword('');
+              }}
               className="mt-3 w-full text-sm text-gray-400 hover:text-white"
             >
               {authMode === 'signin' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
@@ -220,7 +320,55 @@ export function Header() {
               Отмена
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
+      )}
+
+      {nameOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          role="presentation"
+          onClick={() => setNameOpen(false)}
+        >
+          <div
+            className="glass-modal relative z-[201] w-full max-w-sm p-6"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-lg font-semibold text-genshin-gold">Ваше имя</h3>
+            <p className="mb-4 text-sm text-gray-400">
+              Другие пользователи видят только это имя, не email.
+            </p>
+            <form onSubmit={handleNameSave} className="space-y-3">
+              <input
+                type="text"
+                required
+                maxLength={30}
+                placeholder="Например: Lumena"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                className="glass-input w-full px-3 py-2 text-sm"
+              />
+              {nameError && <p className="text-sm text-red-300">{nameError}</p>}
+              <button
+                type="submit"
+                disabled={nameSaving}
+                className="w-full rounded bg-genshin-gold py-2 font-medium text-genshin-dark hover:opacity-90 disabled:opacity-50"
+              >
+                {nameSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => setNameOpen(false)}
+              className="mt-2 w-full text-sm text-gray-500 hover:text-gray-300"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>,
+        document.body,
       )}
     </header>
   );

@@ -11,6 +11,7 @@
 CREATE TABLE public.profiles (
     id          UUID PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
     display_name TEXT,
+    role        TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('owner', 'admin', 'user')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -1,7 +1,7 @@
 /**
  * Все страницы приложения V2.
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
   CharacterCard,
@@ -13,6 +13,8 @@ import {
   ConfirmModal,
   BarChart,
   PieChart,
+  LoadingState,
+  ErrorState,
 } from './components';
 import {
   ARTIFACT_SUMMARY_FIELDS,
@@ -26,6 +28,12 @@ import {
 } from './mockData';
 import { CHARACTER_REGIONS } from './characters';
 import { useAppState } from './context';
+import { formatDisplayName } from './lib/displayName';
+import {
+  fetchResultsUsers,
+  fetchUserResults,
+  buildLocalResultsPayload,
+} from './services/resultsService';
 
 /* ═══════════════════════════════════════════
    1. Главная страница
@@ -547,44 +555,45 @@ export function TeamPage() {
 /* ═══════════════════════════════════════════
    5. Результаты DPS
    ═══════════════════════════════════════════ */
-export function ResultsPage() {
-  const { team, getConfig, findCharacter } = useAppState();
-  const [rotationTime, setRotationTime] = useState(20);
-  const [comparison, setComparison] = useState({ a: null, b: null });
 
-  const teamData = useMemo(() => {
-    return team
-      .filter(Boolean)
-      .map((id) => {
-        const config = getConfig(id);
-        const char = findCharacter(id);
-        if (!config || !char) return null;
-        return calculateMockDps(config, char);
-      })
-      .filter(Boolean);
-  }, [team, getConfig]);
+function buildTeamDataFromPayload(characterIds, configs, findCharacter) {
+  const configById = new Map(configs.map((c) => [c.characterId, c]));
+  const ids = (characterIds || []).filter(Boolean);
+  const source = ids.length > 0 ? ids : configs.map((c) => c.characterId);
+
+  return source
+    .map((id) => {
+      const config = configById.get(id);
+      const char = findCharacter(id);
+      if (!config || !char) return null;
+      return calculateMockDps(config, char);
+    })
+    .filter(Boolean);
+}
+
+function UserResultsView({ displayName, characterIds, configs, findCharacter }) {
+  const [rotationTime, setRotationTime] = useState(20);
+
+  const teamData = useMemo(
+    () => buildTeamDataFromPayload(characterIds, configs, findCharacter),
+    [characterIds, configs, findCharacter],
+  );
 
   const totalDps = teamData.reduce((s, d) => s + d.totalDps, 0);
   const pieData = teamData.map((d) => ({ name: d.name, value: d.totalDps }));
 
-  const saveForComparison = (slot) => {
-    setComparison((prev) => ({ ...prev, [slot]: { teamData, totalDps, rotationTime } }));
-  };
-
   if (teamData.length === 0) {
     return (
-      <div className="px-4 py-12 text-center">
-        <p className="text-gray-400">Нет данных для расчёта. Сформируйте команду.</p>
-        <Link to="/team" className="mt-4 inline-block text-genshin-gold">← К команде</Link>
-      </div>
+      <p className="text-gray-400">Нет данных для расчёта. Сформируйте команду.</p>
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold text-genshin-gold">Результаты DPS</h1>
+    <>
+      <h1 className="mb-6 text-2xl font-bold text-genshin-gold">
+        Расчёт: {displayName}
+      </h1>
 
-      {/* ── Урон персонажей ── */}
       <section className="glass-panel mb-8 p-6">
         <h2 className="mb-4 text-lg font-semibold">Урон персонажей</h2>
         <div className="overflow-x-auto">
@@ -603,36 +612,37 @@ export function ResultsPage() {
             </thead>
             <tbody>
               {teamData.map((d) =>
-                Object.entries({ 'Автоатака': d.skills.auto, 'Скилл': d.skills.skill, 'Взрыв': d.skills.burst }).map(
-                  ([skillName, skill], idx) => (
-                    <tr key={`${d.characterId}-${skillName}`} className="border-b border-gray-700/50">
-                      {idx === 0 && (
-                        <td className="py-2 pr-4" rowSpan={3}>
-                          <span className="inline-flex items-center gap-2">
-                            <CharacterAvatar character={findCharacter(d.characterId)} size="xs" />
-                            {d.name}
-                          </span>
-                        </td>
-                      )}
-                      <td className="py-2 pr-4">
-                        {skillName}
-                        {skill.affectedByConst && (
-                          <span className="ml-1 text-genshin-gold" title={`C${d.constellation} влияет`}>★</span>
-                        )}
+                Object.entries({
+                  'Автоатака': d.skills.auto,
+                  'Скилл': d.skills.skill,
+                  'Взрыв': d.skills.burst,
+                }).map(([skillName, skill], idx) => (
+                  <tr key={`${d.characterId}-${skillName}`} className="border-b border-gray-700/50">
+                    {idx === 0 && (
+                      <td className="py-2 pr-4" rowSpan={3}>
+                        <span className="inline-flex items-center gap-2">
+                          <CharacterAvatar character={findCharacter(d.characterId)} size="xs" />
+                          {d.name}
+                        </span>
                       </td>
-                      <td className="py-2 pr-4">{skill.normal.toLocaleString()}</td>
-                      <td className="py-2">{skill.crit.toLocaleString()}</td>
-                    </tr>
-                  ),
-                ),
+                    )}
+                    <td className="py-2 pr-4">
+                      {skillName}
+                      {skill.affectedByConst && (
+                        <span className="ml-1 text-genshin-gold" title={`C${d.constellation} влияет`}>★</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-4">{skill.normal.toLocaleString()}</td>
+                    <td className="py-2">{skill.crit.toLocaleString()}</td>
+                  </tr>
+                )),
               )}
             </tbody>
           </table>
         </div>
       </section>
 
-      {/* ── Итого команды ── */}
-      <section className="glass-panel mb-8 p-6">
+      <section className="glass-panel p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-lg font-semibold">
             <Tooltip text="Суммарный DPS" formula={FORMULAS.teamDps}>Итого команды</Tooltip>
@@ -650,64 +660,189 @@ export function ResultsPage() {
           </label>
         </div>
         <p className="mb-4 text-3xl font-bold text-genshin-gold">
-          {(totalDps * rotationTime / 20).toLocaleString()} <span className="text-base font-normal text-gray-400">урона за {rotationTime}с</span>
+          {(totalDps * rotationTime / 20).toLocaleString()}
+          {' '}
+          <span className="text-base font-normal text-gray-400">урона за {rotationTime}с</span>
         </p>
         <div className="grid gap-6 md:grid-cols-2">
           <BarChart data={pieData.map((d) => ({ name: d.name, value: d.value }))} />
           <PieChart data={pieData} />
         </div>
       </section>
+    </>
+  );
+}
 
-      {/* ── Сравнение билдов ── */}
-      <section className="glass-panel p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Сравнение билдов</h2>
-          <ActionButton variant="secondary" onClick={() => saveForComparison(comparison.a ? 'b' : 'a')}>
-            Добавить для сравнения
-          </ActionButton>
-        </div>
+export function ResultsPage() {
+  const { isAuthenticated, profile, team, savedConfigs } = useAppState();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-        {(comparison.a || comparison.b) ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {['a', 'b'].map((slot) => {
-              const build = comparison[slot];
-              return (
-                <div key={slot} className="glass-panel-sm p-4">
-                  <h3 className="mb-3 font-medium text-genshin-gold">Билд {slot === 'a' ? 'A' : 'B'}</h3>
-                  {build ? (
-                    <>
-                      <p className="mb-2 text-2xl font-bold">{build.totalDps.toLocaleString()} DPS</p>
-                      <p className="mb-3 text-sm text-gray-400">Ротация: {build.rotationTime}с</p>
-                      <ul className="space-y-1 text-sm">
-                        {build.teamData.map((d) => (
-                          <li key={d.characterId} className="flex items-center gap-2">
-                            <CharacterAvatar character={findCharacter(d.characterId)} size="xs" />
-                            {d.name}: {d.totalDps.toLocaleString()}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : (
-                    <p className="text-gray-500">Не сохранён</p>
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    fetchResultsUsers()
+      .then((list) => {
+        if (!cancelled) setUsers(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Ошибка загрузки');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
+
+  const myId = profile?.id;
+  const localHasTeam = team.some(Boolean);
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      <h1 className="mb-2 text-2xl font-bold text-genshin-gold">Результаты</h1>
+      <p className="mb-6 text-sm text-gray-400">
+        Выберите игрока, чтобы посмотреть расчёт урона команды.
+      </p>
+
+      {!isAuthenticated && localHasTeam && (
+        <ul className="glass-panel divide-y divide-white/10">
+          <li>
+            <Link
+              to="/results/local"
+              className="flex items-center justify-between px-4 py-3 transition hover:bg-white/5"
+            >
+              <span className="font-medium text-genshin-gold">Гость (локальный расчёт)</span>
+              <span className="text-sm text-gray-400">→</span>
+            </Link>
+          </li>
+        </ul>
+      )}
+
+      {!isAuthenticated && !localHasTeam && (
+        <p className="text-gray-400">
+          Войдите и соберите команду, или настройте локальный расчёт на вкладке «Команда».
+        </p>
+      )}
+
+      {isAuthenticated && loading && <LoadingState message="Загрузка списка..." />}
+
+      {isAuthenticated && error && (
+        <ErrorState message={error} onRetry={() => window.location.reload()} />
+      )}
+
+      {isAuthenticated && !loading && !error && (
+        <ul className="glass-panel divide-y divide-white/10">
+          {users.length === 0 && (
+            <li className="px-4 py-6 text-center text-gray-400">Пока нет сохранённых расчётов</li>
+          )}
+          {users.map(({ userId, displayName, memberCount }) => (
+            <li key={userId}>
+              <Link
+                to={`/results/${userId}`}
+                className="flex items-center justify-between px-4 py-3 transition hover:bg-white/5"
+              >
+                <span className="font-medium text-genshin-gold">
+                  {displayName}
+                  {userId === myId && (
+                    <span className="ml-2 text-xs text-gray-400">(вы)</span>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-gray-400">Нажмите «Добавить для сравнения», чтобы сохранить текущий расчёт.</p>
-        )}
+                </span>
+                <span className="text-sm text-gray-400">
+                  {memberCount > 0 ? `${memberCount} в команде` : 'нет команды'} →
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
-        {comparison.a && comparison.b && (
-          <p className="mt-4 text-center text-lg">
-            Разница:{' '}
-            <span className={comparison.b.totalDps > comparison.a.totalDps ? 'text-green-400' : 'text-red-400'}>
-              {comparison.b.totalDps > comparison.a.totalDps ? '+' : ''}
-              {(comparison.b.totalDps - comparison.a.totalDps).toLocaleString()} DPS
-            </span>
-          </p>
-        )}
-      </section>
+export function UserResultsPage() {
+  const { userId } = useParams();
+  const {
+    findCharacter,
+    isAuthenticated,
+    profile,
+    team,
+    savedConfigs,
+    getConfig,
+  } = useAppState();
+
+  const [payload, setPayload] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        if (userId === 'local') {
+          const configs = team
+            .filter(Boolean)
+            .map((id) => getConfig(id))
+            .filter(Boolean);
+          const local = buildLocalResultsPayload(
+            profile?.displayName || 'Гость',
+            team,
+            configs,
+          );
+          if (!cancelled) setPayload(local);
+          return;
+        }
+
+        if (!isAuthenticated) {
+          throw new Error('Войдите, чтобы смотреть расчёты других игроков');
+        }
+
+        const data = await fetchUserResults(userId);
+        if (!cancelled) setPayload(data);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Ошибка загрузки');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, [userId, isAuthenticated, team, savedConfigs, profile?.displayName, getConfig]);
+
+  if (loading) {
+    return <LoadingState message="Загрузка расчёта..." />;
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-8">
+        <ErrorState message={error} />
+        <Link to="/results" className="mt-4 inline-block text-genshin-gold">← К списку</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8">
+      <Link to="/results" className="mb-4 inline-block text-sm text-genshin-gold hover:underline">
+        ← К списку результатов
+      </Link>
+      <UserResultsView
+        displayName={formatDisplayName(payload?.displayName)}
+        characterIds={payload?.team || []}
+        configs={payload?.configs || []}
+        findCharacter={findCharacter}
+      />
     </div>
   );
 }
