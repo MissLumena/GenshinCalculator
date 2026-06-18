@@ -2,6 +2,7 @@
  * V2 — полный список персонажей, сгруппированный по регионам.
  * iconId — slug для genshin.jmp.blue (аватар из игры).
  */
+import { CHARACTER_NAME_RU } from './characterNamesRu.js';
 
 export const CHARACTER_REGIONS = [
   { id: 'special', label: 'Особые' },
@@ -47,7 +48,7 @@ const RAW = [
   ['durin', 'Durin', 'Дурин', 'mondstadt', 'Pyro', 'Sword', 5],
   ['varka', 'Varka', 'Варка', 'mondstadt', 'Anemo', 'Claymore', 5],
   ['pulonia', 'Pulonia', 'Прюн', 'mondstadt', 'Hydro', 'Catalyst', 4],
-  ['loen', 'Loen', 'Лоэн', 'mondstadt', 'Anemo', 'Bow', 4],
+  ['loen', 'Loen', 'Лоэн', 'mondstadt', 'Cryo', 'Bow', 5],
   // Ли Юэ
   ['baizhu', 'Baizhu', 'Бай Чжу', 'liyue', 'Dendro', 'Catalyst', 5],
   ['beidou', 'Beidou', 'Бэй Доу', 'liyue', 'Electro', 'Claymore', 4],
@@ -102,6 +103,7 @@ const RAW = [
   ['lynette', 'Lynette', 'Lynette', 'fontaine', 'Anemo', 'Sword', 4],
   ['freminet', 'Freminet', 'Freminet', 'fontaine', 'Cryo', 'Claymore', 4],
   ['neuvillette', 'Neuvillette', 'Neuvillette', 'fontaine', 'Hydro', 'Catalyst', 5],
+  ['wriothesley', 'Wriothesley', 'Wriothesley', 'fontaine', 'Cryo', 'Catalyst', 5],
   ['furina', 'Furina', 'Furina', 'fontaine', 'Hydro', 'Sword', 5],
   ['charlotte', 'Charlotte', 'Charlotte', 'fontaine', 'Cryo', 'Catalyst', 4],
   ['navia', 'Navia', 'Navia', 'fontaine', 'Geo', 'Claymore', 5],
@@ -124,7 +126,7 @@ const RAW = [
   ['ineffa', 'Ineffa', 'Ineffa', 'nodkrai', 'Electro', 'Polearm', 5],
   ['lauma', 'Lauma', 'Lauma', 'nodkrai', 'Dendro', 'Catalyst', 5],
   ['aino', 'Aino', 'Ayno', 'nodkrai', 'Hydro', 'Bow', 4],
-  ['flins', 'Flins', 'Flynn', 'nodkrai', 'Anemo', 'Sword', 5],
+  ['flins', 'Flins', 'Флинс', 'nodkrai', 'Electro', 'Sword', 5],
   ['nefer', 'Nefer', 'Nefer', 'nodkrai', 'Dendro', 'Catalyst', 5],
   ['yagoda', 'Yagoda', 'Ягода', 'nodkrai', 'Hydro', 'Catalyst', 4],
   ['columbina', 'Columbina', 'Kolombina', 'nodkrai', 'Hydro', 'Catalyst', 5],
@@ -138,7 +140,8 @@ const RAW = [
 ];
 
 function buildCharacter([id, name, nameRu, region, element, weapon, rarity, iconId]) {
-  return { id, name, nameRu, region, element, weapon, rarity, iconId: iconId || id };
+  const resolvedRu = CHARACTER_NAME_RU[id] ?? nameRu;
+  return { id, name, nameEn: name, nameRu: resolvedRu, region, element, weapon, rarity, iconId: iconId || id };
 }
 
 export const CHARACTERS = RAW.map(buildCharacter);

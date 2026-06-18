@@ -2,13 +2,13 @@
  * Загрузка состава команды с join user_characters → game_characters.
  */
 import { getSupabaseClient } from '../lib/supabase';
-import { fromSupabaseError } from '../lib/apiErrors';
 import { dbCharacterToFrontend } from './mappers';
 
 const EMPTY_SLOTS = [null, null, null, null];
 
-function wrapError(error, context) {
-  return fromSupabaseError(error, context);
+function wrapSupabaseError(error, context) {
+  const message = error?.message || 'Неизвестная ошибка Supabase';
+  return new Error(`${context}: ${message}`);
 }
 
 /** ATK одного персонажа = atk_base + atk_bonus */
@@ -64,6 +64,24 @@ export function buildTeamComposition(members, findCharacter) {
   return {
     slots,
     totalAtk: calcTeamTotalAtk(slots),
+  };
+}
+
+/** Оптимистичное добавление персонажа в слот (до сохранения на сервер). */
+export function prepareTeamMemberAdd(team, savedConfigs, slotIdx, characterId, defaultConfig) {
+  if (slotIdx == null || slotIdx < 0 || slotIdx > 3) {
+    return { nextTeam: team, nextConfigs: savedConfigs, createdConfig: null };
+  }
+
+  const existing = savedConfigs.find((c) => c.characterId === characterId);
+  const nextConfigs = existing ? savedConfigs : [...savedConfigs, defaultConfig];
+  const nextTeam = [...team];
+  nextTeam[slotIdx] = characterId;
+
+  return {
+    nextTeam,
+    nextConfigs,
+    createdConfig: existing ? null : defaultConfig,
   };
 }
 
@@ -131,7 +149,7 @@ export async function fetchTeamComposition(teamId, findCharacter) {
     .order('slot_index');
 
   if (error) {
-    throw wrapError(error, 'Ошибка загрузки состава команды');
+    throw wrapSupabaseError(error, 'Ошибка загрузки состава команды');
   }
 
   return buildTeamComposition(data, findCharacter);

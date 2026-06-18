@@ -2,7 +2,7 @@
  * Загрузка справочников game_characters и artifact_sets из Supabase.
  */
 import { getSupabaseClient } from '../lib/supabase';
-import { fromSupabaseError } from '../lib/apiErrors';
+import { withTimeout } from '../lib/withTimeout';
 import { CHARACTERS } from '../characters';
 import { ARTIFACT_SETS as LOCAL_ARTIFACT_SETS } from '../mockData';
 import {
@@ -11,8 +11,9 @@ import {
   mergeCharacters,
 } from './mappers';
 
-function wrapError(error, context) {
-  return fromSupabaseError(error, context);
+function wrapSupabaseError(error, context) {
+  const message = error?.message || 'Неизвестная ошибка Supabase';
+  return new Error(`${context}: ${message}`);
 }
 
 export async function fetchCatalog() {
@@ -25,16 +26,20 @@ export async function fetchCatalog() {
     };
   }
 
-  const [charactersResult, artifactSetsResult] = await Promise.all([
-    supabase.from('game_characters').select('*').order('name_ru'),
-    supabase.from('artifact_sets').select('*').order('name'),
-  ]);
+  const [charactersResult, artifactSetsResult] = await withTimeout(
+    Promise.all([
+      supabase.from('game_characters').select('*').order('name_ru'),
+      supabase.from('artifact_sets').select('*').order('name'),
+    ]),
+    8000,
+    'Таймаут загрузки справочников из Supabase',
+  );
 
   if (charactersResult.error) {
-    throw wrapError(charactersResult.error, 'Ошибка загрузки персонажей');
+    throw wrapSupabaseError(charactersResult.error, 'Ошибка загрузки персонажей');
   }
   if (artifactSetsResult.error) {
-    throw wrapError(artifactSetsResult.error, 'Ошибка загрузки сетов артефактов');
+    throw wrapSupabaseError(artifactSetsResult.error, 'Ошибка загрузки сетов артефактов');
   }
 
   const dbCharacters = (charactersResult.data || []).map(dbCharacterToFrontend);

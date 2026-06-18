@@ -2,24 +2,26 @@
  * CRUD пользовательских данных: персонажи, команда, артефакты.
  */
 import { getSupabaseClient } from '../lib/supabase';
-import { fromSupabaseError, toApiError, badRequest } from '../lib/apiErrors';
-import { assertSameUser, filterCharacterRowForRole } from '../lib/permissions';
-import { validateCharacterConfig, validateTeamComposition } from '../lib/validation';
-import { configToArtifactRows, configToDbRow, dbRowToConfig } from './mappers';
+import { withTimeout } from '../lib/withTimeout';
+import {
+  configToArtifactRows,
+  configToDbRow,
+  dbRowToConfig,
+} from './mappers';
 import { fetchTeamComposition } from './teamService';
+import { formatDisplayName } from '../lib/displayName';
 
 const DEFAULT_TEAM_NAME = 'Основная команда';
 
-function wrapError(error, context) {
-  return fromSupabaseError(error, context);
+function wrapSupabaseError(error, context) {
+  const message = error?.message || 'Неизвестная ошибка Supabase';
+  return new Error(`${context}: ${message}`);
 }
 
-export async function fetchUserData(userId, sessionUserId, role = 'user') {
-  assertSameUser(sessionUserId, userId, role);
-
+export async function fetchUserData(userId) {
   const supabase = getSupabaseClient();
   if (!supabase) {
-    throw badRequest('Supabase не настроен');
+    throw new Error('Supabase не настроен');
   }
 
   const { data: characterRows, error: charactersError } = await supabase
@@ -29,7 +31,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
     .order('updated_at', { ascending: false });
 
   if (charactersError) {
-    throw wrapError(charactersError, 'Ошибка загрузки персонажей пользователя');
+    throw wrapSupabaseError(charactersError, 'Ошибка загрузки персонажей пользователя');
   }
 
   const characterIds = (characterRows || []).map((row) => row.id);
@@ -42,7 +44,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
       .in('user_character_id', characterIds);
 
     if (artifactsError) {
-      throw wrapError(artifactsError, 'Ошибка загрузки артефактов');
+      throw wrapSupabaseError(artifactsError, 'Ошибка загрузки артефактов');
     }
     artifactRows = data || [];
   }
@@ -59,12 +61,12 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
 
   const { data: profileRow, error: profileError } = await supabase
     .from('profiles')
-    .select('active_team_id')
+    .select('active_team_id, display_name')
     .eq('id', userId)
     .maybeSingle();
 
   if (profileError) {
-    throw wrapError(profileError, 'Ошибка загрузки профиля');
+    throw wrapSupabaseError(profileError, 'Ошибка загрузки профиля');
   }
 
   let teamId = profileRow?.active_team_id ?? null;
@@ -78,7 +80,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
       .maybeSingle();
 
     if (activeTeamError) {
-      throw wrapError(activeTeamError, 'Ошибка загрузки активной команды');
+      throw wrapSupabaseError(activeTeamError, 'Ошибка загрузки активной команды');
     }
     if (!activeTeam) teamId = null;
   }
@@ -92,7 +94,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
       .maybeSingle();
 
     if (defaultTeamError) {
-      throw wrapError(defaultTeamError, 'Ошибка загрузки команды по умолчанию');
+      throw wrapSupabaseError(defaultTeamError, 'Ошибка загрузки команды по умолчанию');
     }
     teamId = defaultTeam?.id ?? null;
   }
@@ -107,7 +109,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
       .maybeSingle();
 
     if (fallbackError) {
-      throw wrapError(fallbackError, 'Ошибка загрузки команды');
+      throw wrapSupabaseError(fallbackError, 'Ошибка загрузки команды');
     }
     teamId = fallbackTeam?.id ?? null;
   }
@@ -120,7 +122,7 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
       .single();
 
     if (createTeamError) {
-      throw wrapError(createTeamError, 'Ошибка создания команды');
+      throw wrapSupabaseError(createTeamError, 'Ошибка создания команды');
     }
     teamId = newTeam.id;
 
@@ -139,32 +141,45 @@ export async function fetchUserData(userId, sessionUserId, role = 'user') {
     teamId,
     teamComposition: slots,
     teamTotalAtk: totalAtk,
+    displayName: formatDisplayName(profileRow?.display_name),
   };
 }
 
-async function upsertViaRpc(supabase, row, config) {
-  const payload = {
-    ...row,
-    artifacts_summary: row.artifacts_summary ?? config.artifacts ?? {},
-  };
-  if (config.id) payload.id = config.id;
-
-  const { data, error } = await supabase.rpc('upsert_user_character', {
-    p_payload: payload,
-  });
-
-  if (!error) return data;
-
-  if (error.code === 'PGRST202' || /function.*does not exist/i.test(error.message || '')) {
-    return null;
+export async function upsertUserCharacter(userId, config) {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error('Supabase не настроен');
   }
 
-  throw wrapError(error, 'Ошибка сохранения персонажа');
-}
+  const { data: gameChar, error: gameCharError } = await supabase
+    .from('game_characters')
+    .select('id')
+    .eq('id', config.characterId)
+    .maybeSingle();
 
-async function upsertViaTable(supabase, userId, config, role) {
-  const row = filterCharacterRowForRole(configToDbRow(config, userId), role);
+  if (gameCharError) {
+    throw wrapSupabaseError(gameCharError, 'Ошибка проверки персонажа');
+  }
+  if (!gameChar) {
+    throw new Error('Персонаж не найден в базе данных после синхронизации');
+  }
+
+  const row = configToDbRow(config, userId);
   let userCharacterId = config.id;
+
+  if (!userCharacterId) {
+    const { data: existing, error: lookupError } = await supabase
+      .from('user_characters')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('game_character_id', config.characterId)
+      .maybeSingle();
+
+    if (lookupError) {
+      throw wrapSupabaseError(lookupError, 'Ошибка поиска персонажа');
+    }
+    userCharacterId = existing?.id ?? null;
+  }
 
   if (userCharacterId) {
     const { error: updateError } = await supabase
@@ -174,7 +189,7 @@ async function upsertViaTable(supabase, userId, config, role) {
       .eq('user_id', userId);
 
     if (updateError) {
-      throw wrapError(updateError, 'Ошибка обновления персонажа');
+      throw wrapSupabaseError(updateError, 'Ошибка обновления персонажа');
     }
   } else {
     const { data, error: insertError } = await supabase
@@ -184,95 +199,51 @@ async function upsertViaTable(supabase, userId, config, role) {
       .single();
 
     if (insertError) {
-      throw wrapError(insertError, 'Ошибка сохранения персонажа');
+      throw wrapSupabaseError(insertError, 'Ошибка сохранения персонажа');
     }
     userCharacterId = data.id;
   }
 
-  return userCharacterId;
-}
+  const artifactSetId = config.artifacts?.set || 'crimson';
+  const { data: artifactSet, error: setLookupError } = await supabase
+    .from('artifact_sets')
+    .select('id')
+    .eq('id', artifactSetId)
+    .maybeSingle();
 
-export async function upsertUserCharacter(
-  userId,
-  config,
-  role = 'user',
-  sessionUserId = userId,
-) {
-  assertSameUser(sessionUserId, userId, role);
-
-  const validationError = validateCharacterConfig(config);
-  if (validationError) {
-    throw badRequest(validationError);
+  if (setLookupError) {
+    throw wrapSupabaseError(setLookupError, 'Ошибка проверки сета артефактов');
   }
 
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    throw badRequest('Supabase не настроен');
-  }
-
-  const row = filterCharacterRowForRole(configToDbRow(config, userId), role);
-
-  let userCharacterId = await upsertViaRpc(supabase, row, config);
-  if (userCharacterId == null) {
-    userCharacterId = await upsertViaTable(supabase, userId, config, role);
-  }
-
-  const artifactRows = configToArtifactRows(userCharacterId, config.artifacts);
-  const { error: deleteError } = await supabase
-    .from('character_artifacts')
-    .delete()
-    .eq('user_character_id', userCharacterId);
-
-  if (deleteError) {
-    throw wrapError(deleteError, 'Ошибка обновления артефактов');
-  }
-
-  if (artifactRows.length > 0) {
-    const { error: insertArtifactsError } = await supabase
+  if (artifactSet) {
+    const artifactRows = configToArtifactRows(userCharacterId, config.artifacts);
+    const { error: deleteError } = await supabase
       .from('character_artifacts')
-      .insert(artifactRows);
+      .delete()
+      .eq('user_character_id', userCharacterId);
 
-    if (insertArtifactsError) {
-      throw wrapError(insertArtifactsError, 'Ошибка сохранения артефактов');
+    if (deleteError) {
+      throw wrapSupabaseError(deleteError, 'Ошибка обновления артефактов');
+    }
+
+    if (artifactRows.length > 0) {
+      const { error: insertArtifactsError } = await supabase
+        .from('character_artifacts')
+        .insert(artifactRows);
+
+      if (insertArtifactsError) {
+        throw wrapSupabaseError(insertArtifactsError, 'Ошибка сохранения артефактов');
+      }
     }
   }
 
   return { ...config, id: userCharacterId };
 }
 
-async function syncViaRpc(supabase, activeTeamId, members) {
-  const { data, error } = await supabase.rpc('sync_team_members', {
-    p_team_id: activeTeamId,
-    p_members: members,
-  });
-
-  if (!error) return data;
-
-  if (error.code === 'PGRST202' || /function.*does not exist/i.test(error.message || '')) {
-    return null;
-  }
-
-  throw wrapError(error, 'Ошибка синхронизации команды');
-}
-
-export async function syncTeam(
-  userId,
-  teamId,
-  team,
-  savedConfigs,
-  sessionUserId = userId,
-  role = 'user',
-) {
-  assertSameUser(sessionUserId, userId, role);
-
-  const teamError = validateTeamComposition(team, savedConfigs);
-  if (teamError) {
-    throw badRequest(teamError);
-  }
-
+export async function syncTeam(userId, teamId, team, savedConfigs) {
   const supabase = getSupabaseClient();
   if (!supabase) {
-    throw badRequest('Supabase не настроен');
+    throw new Error('Supabase не настроен');
   }
 
   let activeTeamId = teamId;
@@ -285,7 +256,7 @@ export async function syncTeam(
       .single();
 
     if (createError) {
-      throw wrapError(createError, 'Ошибка создания команды');
+      throw wrapSupabaseError(createError, 'Ошибка создания команды');
     }
     activeTeamId = newTeam.id;
 
@@ -295,43 +266,112 @@ export async function syncTeam(
       .eq('id', userId);
   }
 
-  const configByCharacterId = new Map(savedConfigs.map((c) => [c.characterId, c]));
-  const members = [];
-
-  team.forEach((characterId, slotIndex) => {
-    if (!characterId) return;
-    const cfg = configByCharacterId.get(characterId);
-    if (!cfg?.id) return;
-    members.push({
-      user_character_id: cfg.id,
-      slot_index: slotIndex,
-      rotation_order: slotIndex + 1,
-    });
-  });
-
-  const rpcResult = await syncViaRpc(supabase, activeTeamId, members);
-  if (rpcResult != null) {
-    return rpcResult;
-  }
-
   const { error: deleteError } = await supabase
     .from('team_members')
     .delete()
     .eq('team_id', activeTeamId);
 
   if (deleteError) {
-    throw wrapError(deleteError, 'Ошибка обновления команды');
+    throw wrapSupabaseError(deleteError, 'Ошибка обновления команды');
   }
 
+  const configByCharacterId = new Map(savedConfigs.map((c) => [c.characterId, c]));
+  const members = [];
+
+  team.forEach((characterId, slotIndex) => {
+    if (!characterId) return;
+    const config = configByCharacterId.get(characterId);
+    if (!config?.id) return;
+    members.push({
+      team_id: activeTeamId,
+      user_character_id: config.id,
+      slot_index: slotIndex,
+      rotation_order: slotIndex + 1,
+    });
+  });
+
   if (members.length > 0) {
-    const rows = members.map((m) => ({ team_id: activeTeamId, ...m }));
-    const { error: insertError } = await supabase.from('team_members').insert(rows);
+    const { error: insertError } = await supabase.from('team_members').insert(members);
     if (insertError) {
-      throw wrapError(insertError, 'Ошибка сохранения состава команды');
+      throw wrapSupabaseError(insertError, 'Ошибка сохранения состава команды');
     }
   }
 
   return activeTeamId;
 }
 
-export { toApiError };
+export async function signIn(email, password) {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase не настроен');
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw wrapSupabaseError(error, 'Ошибка входа');
+  return data.session;
+}
+
+export async function signUp(email, password, displayName) {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase не настроен');
+
+  const trimmedName = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!trimmedName) {
+    throw new Error('Укажите имя');
+  }
+  if (trimmedName.length > 100) {
+    throw new Error('Имя не должно быть длиннее 100 символов');
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { display_name: trimmedName },
+    },
+  });
+  if (error) throw wrapSupabaseError(error, 'Ошибка регистрации');
+
+  if (data.user) {
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ display_name: trimmedName })
+      .eq('id', data.user.id);
+
+    if (profileError && data.session) {
+      throw wrapSupabaseError(profileError, 'Ошибка сохранения имени');
+    }
+  }
+
+  return data.session;
+}
+
+export async function signOut() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.auth.signOut();
+  if (error) throw wrapSupabaseError(error, 'Ошибка выхода');
+}
+
+export function onAuthStateChange(callback) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return () => {};
+
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    callback(session);
+  });
+
+  return () => subscription.unsubscribe();
+}
+
+export async function getInitialSession() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const { data, error } = await withTimeout(
+    supabase.auth.getSession(),
+    8000,
+    'Таймаут проверки сессии Supabase',
+  );
+  if (error) throw wrapSupabaseError(error, 'Ошибка получения сессии');
+  return data.session;
+}

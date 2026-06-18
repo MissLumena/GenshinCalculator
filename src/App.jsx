@@ -6,10 +6,10 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { Header, LoadingState, ErrorState } from './components';
-import { SimpleHeader } from './SimpleHeader';
+import { Header } from './components';
 import { AppContext } from './context';
 import {
   HomePage,
@@ -20,7 +20,7 @@ import {
   UserResultsPage,
 } from './pages';
 
-import { getDefaultConfig, normalizeArtifacts } from './mockData';
+import { getDefaultConfig, normalizeArtifacts, ARTIFACT_SETS as LOCAL_ARTIFACT_SETS } from './mockData';
 import { findCharacterById, CHARACTERS as LOCAL_CHARACTERS } from './characters';
 import { getSupabaseConfigError } from './lib/supabase';
 import { fetchCatalog } from './services/catalogService';
@@ -28,33 +28,20 @@ import {
   fetchUserData,
   upsertUserCharacter,
   syncTeam,
-} from './services/userDataService';
-import {
   signIn,
   signUp,
   signOut,
   onAuthStateChange,
   getInitialSession,
-  fetchMyProfile,
-  claimOwnerRole,
-  updateDisplayName as saveDisplayName,
-} from './services/authService';
-import { ROLES } from './lib/permissions';
-import { toApiError } from './lib/apiErrors';
+} from './services/userDataService';
 import {
-  fetchTeamComposition,
   buildLocalTeamComposition,
 } from './services/teamService';
+import { updateMyDisplayName } from './services/resultsService';
+import { formatDisplayName } from './lib/displayName';
+import { ensureCatalogForConfig } from './services/catalogSyncService';
 
 const STORAGE_KEY = 'genshin-calc-v2';
-
-function formatErrorMessage(err) {
-  const apiError = toApiError(err);
-  if (apiError.status === 400 || apiError.status === 403) {
-    return `[${apiError.status}] ${apiError.message}`;
-  }
-  return apiError.message;
-}
 
 export { useAppState } from './context';
 
@@ -82,7 +69,6 @@ export default function App() {
   const [artifactSets, setArtifactSets] = useState([]);
 
   const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [userDataLoading, setUserDataLoading] = useState(false);
@@ -95,21 +81,12 @@ export default function App() {
   const [teamId, setTeamId] = useState(null);
   const [teamComposition, setTeamComposition] = useState([null, null, null, null]);
   const [teamTotalAtk, setTeamTotalAtk] = useState(0);
+  const [profileDisplayName, setProfileDisplayName] = useState(null);
+
+  /** Отменяет устаревший fetchUserData, если пользователь уже изменил команду. */
+  const userDataLoadSeqRef = useRef(0);
 
   const isAuthenticated = Boolean(session?.user);
-  const userRole = profile?.role ?? ROLES.USER;
-
-  const loadProfile = useCallback(async () => {
-    try {
-      await claimOwnerRole().catch(() => {});
-      const nextProfile = await fetchMyProfile();
-      setProfile(nextProfile);
-      return nextProfile;
-    } catch {
-      setProfile(null);
-      return null;
-    }
-  }, []);
 
   const findCharacter = useCallback(
     (characterId) => characters.find((c) => c.id === characterId) || findCharacterById(characterId),
@@ -125,8 +102,12 @@ export default function App() {
 
       const configError = getSupabaseConfigError();
       if (configError) {
-        setCatalogError(configError);
-        setCatalogLoading(false);
+        if (!cancelled) {
+          setCharacters(LOCAL_CHARACTERS);
+          setArtifactSets(LOCAL_ARTIFACT_SETS);
+          setCatalogError(null);
+        }
+        if (!cancelled) setCatalogLoading(false);
         return;
       }
 
@@ -138,7 +119,9 @@ export default function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          setCatalogError(formatErrorMessage(err));
+          setCharacters(LOCAL_CHARACTERS);
+          setArtifactSets(LOCAL_ARTIFACT_SETS);
+          setCatalogError(err.message || 'Не удалось загрузить справочники, используются локальные данные');
         }
       } finally {
         if (!cancelled) setCatalogLoading(false);
@@ -156,69 +139,55 @@ export default function App() {
       setAuthLoading(true);
       try {
         const initialSession = await getInitialSession();
-        if (!cancelled) {
-          setSession(initialSession);
-          if (initialSession?.user) {
-            await loadProfile();
-          } else {
-            setProfile(null);
-          }
-        }
+        if (!cancelled) setSession(initialSession);
       } catch {
-        if (!cancelled) {
-          setSession(null);
-          setProfile(null);
-        }
+        if (!cancelled) setSession(null);
       } finally {
         if (!cancelled) setAuthLoading(false);
       }
     }
 
     initAuth();
-    const unsubscribe = onAuthStateChange(async (nextSession) => {
+    const unsubscribe = onAuthStateChange((nextSession) => {
       setSession(nextSession);
-      if (nextSession?.user) {
-        await loadProfile();
-      } else {
-        setProfile(null);
-      }
     });
 
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [loadProfile]);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
 
     if (!session?.user) {
-      const local = loadLocalState();
-      setSavedConfigs(local.savedConfigs);
-      setTeam(local.team);
       setTeamId(null);
+      setProfileDisplayName(null);
       setUserDataError(null);
       return;
     }
 
     let cancelled = false;
+    const loadSeq = userDataLoadSeqRef.current + 1;
+    userDataLoadSeqRef.current = loadSeq;
 
     async function loadUserData() {
       setUserDataLoading(true);
       setUserDataError(null);
       try {
-        const data = await fetchUserData(session.user.id, session.user.id, userRole);
-        if (!cancelled) {
+        const data = await fetchUserData(session.user.id);
+        if (!cancelled && loadSeq === userDataLoadSeqRef.current) {
           setSavedConfigs(data.savedConfigs);
           setTeam(data.team);
           setTeamId(data.teamId);
           setTeamComposition(data.teamComposition);
           setTeamTotalAtk(data.teamTotalAtk);
+          setProfileDisplayName(data.displayName);
         }
       } catch (err) {
         if (!cancelled) {
-          setUserDataError(formatErrorMessage(err));
+          setUserDataError(err.message || 'Не удалось загрузить данные пользователя');
         }
       } finally {
         if (!cancelled) setUserDataLoading(false);
@@ -227,84 +196,21 @@ export default function App() {
 
     loadUserData();
     return () => { cancelled = true; };
-  }, [session?.user?.id, authLoading, userRole]);
+  }, [session?.user?.id, authLoading]);
 
   useEffect(() => {
     if (authLoading) return;
 
-    if (isAuthenticated && teamId) {
-      let cancelled = false;
-      fetchTeamComposition(teamId)
-        .then(({ slots, totalAtk }) => {
-          if (!cancelled) {
-            setTeamComposition(slots);
-            setTeamTotalAtk(totalAtk);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            const local = buildLocalTeamComposition(team, savedConfigs, findCharacter);
-            setTeamComposition(local.slots);
-            setTeamTotalAtk(local.totalAtk);
-          }
-        });
-      return () => { cancelled = true; };
-    }
-
-    const local = buildLocalTeamComposition(team, savedConfigs, findCharacter);
-    setTeamComposition(local.slots);
-    setTeamTotalAtk(local.totalAtk);
-    return undefined;
-  }, [team, teamId, savedConfigs, findCharacter, isAuthenticated, authLoading]);
+    const { slots, totalAtk } = buildLocalTeamComposition(team, savedConfigs, findCharacter);
+    setTeamComposition(slots);
+    setTeamTotalAtk(totalAtk);
+  }, [team, savedConfigs, findCharacter, authLoading]);
 
   useEffect(() => {
-    if (!isAuthenticated && !authLoading) {
-      saveLocalState(savedConfigs, team);
-    }
-  }, [savedConfigs, team, isAuthenticated, authLoading]);
+    saveLocalState(savedConfigs, team);
+  }, [savedConfigs, team]);
 
-  const persistTeam = useCallback(async (nextTeam, configs, currentTeamId) => {
-    if (!session?.user) return currentTeamId;
-    return syncTeam(
-      session.user.id,
-      currentTeamId,
-      nextTeam,
-      configs,
-      session.user.id,
-      userRole,
-    );
-  }, [session?.user, userRole]);
-
-  const saveConfig = useCallback(async (config) => {
-    setActionError(null);
-
-    if (session?.user) {
-      setActionLoading(true);
-      try {
-        const saved = await upsertUserCharacter(
-          session.user.id,
-          config,
-          userRole,
-          session.user.id,
-        );
-        setSavedConfigs((prev) => {
-          const idx = prev.findIndex((c) => c.characterId === saved.characterId);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = saved;
-            return next;
-          }
-          return [...prev, saved];
-        });
-        return saved;
-      } catch (err) {
-        setActionError(formatErrorMessage(err));
-        throw err;
-      } finally {
-        setActionLoading(false);
-      }
-    }
-
+  const persistSavedConfigs = useCallback((config) => {
     setSavedConfigs((prev) => {
       const idx = prev.findIndex((c) => c.characterId === config.characterId);
       if (idx >= 0) {
@@ -315,9 +221,42 @@ export default function App() {
       return [...prev, config];
     });
     return config;
-  }, [session?.user, userRole]);
+  }, []);
+
+  const saveConfig = useCallback(async (config) => {
+    setActionError(null);
+    persistSavedConfigs(config);
+
+    if (!session?.user) {
+      return config;
+    }
+
+    setActionLoading(true);
+    try {
+      await ensureCatalogForConfig(config, findCharacter, artifactSets);
+      const saved = await upsertUserCharacter(session.user.id, config);
+      persistSavedConfigs(saved);
+      return saved;
+    } catch (err) {
+      const message = err.message || 'Ошибка сохранения в облако';
+      setActionError(`${message}. Изменения сохранены локально для расчёта DPS.`);
+      return config;
+    } finally {
+      setActionLoading(false);
+    }
+  }, [session?.user, persistSavedConfigs, findCharacter, artifactSets]);
+
+  const persistTeam = useCallback(async (nextTeam, configs, currentTeamId) => {
+    if (!session?.user) return currentTeamId;
+    return syncTeam(session.user.id, currentTeamId, nextTeam, configs);
+  }, [session?.user]);
+
+  const invalidateUserDataLoad = useCallback(() => {
+    userDataLoadSeqRef.current += 1;
+  }, []);
 
   const setTeamSlot = useCallback(async (slotIdx, characterId) => {
+    invalidateUserDataLoad();
     setActionError(null);
     const nextTeam = [...team];
     nextTeam[slotIdx] = characterId;
@@ -328,12 +267,13 @@ export default function App() {
         const newTeamId = await persistTeam(nextTeam, savedConfigs, teamId);
         setTeamId(newTeamId);
       } catch (err) {
-        setActionError(formatErrorMessage(err));
+        setActionError(err.message || 'Ошибка обновления команды');
       }
     }
-  }, [team, savedConfigs, teamId, session?.user, persistTeam]);
+  }, [team, savedConfigs, teamId, session?.user, persistTeam, invalidateUserDataLoad]);
 
   const clearTeamSlot = useCallback(async (slotIdx) => {
+    invalidateUserDataLoad();
     setActionError(null);
     const nextTeam = [...team];
     nextTeam[slotIdx] = null;
@@ -344,10 +284,10 @@ export default function App() {
         const newTeamId = await persistTeam(nextTeam, savedConfigs, teamId);
         setTeamId(newTeamId);
       } catch (err) {
-        setActionError(formatErrorMessage(err));
+        setActionError(err.message || 'Ошибка обновления команды');
       }
     }
-  }, [team, savedConfigs, teamId, session?.user, persistTeam]);
+  }, [team, savedConfigs, teamId, session?.user, persistTeam, invalidateUserDataLoad]);
 
   const getConfig = useCallback((characterId) => {
     const char = findCharacter(characterId);
@@ -360,51 +300,57 @@ export default function App() {
   }, [savedConfigs, findCharacter]);
 
   const addToTeam = useCallback(async (slotIdx, characterId) => {
+    if (slotIdx == null || slotIdx < 0 || slotIdx > 3) return;
+
+    invalidateUserDataLoad();
     setActionError(null);
     const char = findCharacter(characterId);
     if (!char) return;
 
-    let configs = savedConfigs;
     const existing = savedConfigs.find((c) => c.characterId === characterId);
+    let defaultConfig = null;
+    let configs = savedConfigs;
 
     if (!existing) {
-      const defaultConfig = getDefaultConfig(char);
-      if (session?.user) {
-        setActionLoading(true);
-        try {
-          const saved = await upsertUserCharacter(
-            session.user.id,
-            defaultConfig,
-            userRole,
-            session.user.id,
-          );
-          configs = [...savedConfigs, saved];
-          setSavedConfigs(configs);
-        } catch (err) {
-          setActionError(formatErrorMessage(err));
-          setActionLoading(false);
-          return;
-        }
-        setActionLoading(false);
-      } else {
-        configs = [...savedConfigs, defaultConfig];
-        setSavedConfigs(configs);
-      }
+      defaultConfig = getDefaultConfig(char);
+      configs = [...savedConfigs, defaultConfig];
+      setSavedConfigs(configs);
     }
 
     const nextTeam = [...team];
     nextTeam[slotIdx] = characterId;
     setTeam(nextTeam);
 
-    if (session?.user) {
-      try {
-        const newTeamId = await persistTeam(nextTeam, configs, teamId);
-        setTeamId(newTeamId);
-      } catch (err) {
-        setActionError(formatErrorMessage(err));
+    if (!session?.user) return;
+
+    setActionLoading(true);
+    try {
+      let syncConfigs = configs;
+      if (defaultConfig) {
+        await ensureCatalogForConfig(defaultConfig, findCharacter, artifactSets);
+        const saved = await upsertUserCharacter(session.user.id, defaultConfig);
+        syncConfigs = configs.map((c) => (
+          c.characterId === characterId ? saved : c
+        ));
+        setSavedConfigs(syncConfigs);
       }
+      const newTeamId = await persistTeam(nextTeam, syncConfigs, teamId);
+      setTeamId(newTeamId);
+    } catch (err) {
+      setActionError(err.message || 'Ошибка добавления персонажа');
+    } finally {
+      setActionLoading(false);
     }
-  }, [findCharacter, savedConfigs, session?.user, userRole, team, teamId, persistTeam]);
+  }, [
+    findCharacter,
+    savedConfigs,
+    session?.user,
+    team,
+    teamId,
+    persistTeam,
+    invalidateUserDataLoad,
+    artifactSets,
+  ]);
 
   const handleSignIn = useCallback(async (email, password) => {
     setActionError(null);
@@ -412,51 +358,58 @@ export default function App() {
     try {
       const nextSession = await signIn(email, password);
       setSession(nextSession);
-      await loadProfile();
     } catch (err) {
-      setActionError(formatErrorMessage(err));
+      setActionError(err.message || 'Ошибка входа');
       throw err;
     } finally {
       setActionLoading(false);
     }
-  }, [loadProfile]);
+  }, []);
 
-  const handleSignUp = useCallback(async (email, password) => {
+  const handleSignUp = useCallback(async (email, password, displayName) => {
     setActionError(null);
     setActionLoading(true);
     try {
-      const nextSession = await signUp(email, password);
+      const nextSession = await signUp(email, password, displayName);
       setSession(nextSession);
-      await loadProfile();
+      setProfileDisplayName(formatDisplayName(displayName));
     } catch (err) {
-      setActionError(formatErrorMessage(err));
+      setActionError(err.message || 'Ошибка регистрации');
       throw err;
     } finally {
       setActionLoading(false);
     }
-  }, [loadProfile]);
+  }, []);
 
   const handleSignOut = useCallback(async () => {
     setActionError(null);
     try {
       await signOut();
       setSession(null);
-      setProfile(null);
       const local = loadLocalState();
       setSavedConfigs(local.savedConfigs);
       setTeam(local.team);
       setTeamId(null);
+      setProfileDisplayName(null);
     } catch (err) {
-      setActionError(formatErrorMessage(err));
+      setActionError(err.message || 'Ошибка выхода');
     }
   }, []);
 
   const handleUpdateDisplayName = useCallback(async (displayName) => {
     setActionError(null);
-    const saved = await saveDisplayName(displayName);
-    await loadProfile();
-    return saved;
-  }, [loadProfile]);
+    setActionLoading(true);
+    try {
+      const savedName = await updateMyDisplayName(displayName);
+      setProfileDisplayName(savedName);
+      return savedName;
+    } catch (err) {
+      setActionError(err.message || 'Ошибка обновления имени');
+      throw err;
+    } finally {
+      setActionLoading(false);
+    }
+  }, []);
 
   const value = useMemo(() => ({
     characters,
@@ -474,18 +427,17 @@ export default function App() {
     getConfig,
     addToTeam,
     session,
-    profile,
-    userRole,
     isAuthenticated,
     authLoading,
     userDataLoading,
     userDataError,
     actionError,
     actionLoading,
+    profileDisplayName,
+    updateDisplayName: handleUpdateDisplayName,
     signIn: handleSignIn,
     signUp: handleSignUp,
     signOut: handleSignOut,
-    updateDisplayName: handleUpdateDisplayName,
     clearActionError: () => setActionError(null),
   }), [
     characters,
@@ -503,53 +455,51 @@ export default function App() {
     getConfig,
     addToTeam,
     session,
-    profile,
-    userRole,
     isAuthenticated,
     authLoading,
     userDataLoading,
     userDataError,
     actionError,
     actionLoading,
+    profileDisplayName,
+    handleUpdateDisplayName,
     handleSignIn,
     handleSignUp,
     handleSignOut,
-    handleUpdateDisplayName,
   ]);
-
-  if (catalogLoading) {
-    return (
-      <div className="min-h-screen">
-        <SimpleHeader />
-        <LoadingState message="Загрузка..." />
-      </div>
-    );
-  }
-
-  if (catalogError) {
-    return (
-      <div className="min-h-screen">
-        <SimpleHeader />
-        <ErrorState message={catalogError} />
-      </div>
-    );
-  }
 
   return (
     <AppContext.Provider value={value}>
       <Header />
+      {catalogLoading && (
+        <div className="glass-banner border-genshin-gold/40 text-white">
+          Обновление справочников...
+        </div>
+      )}
+      {catalogError && (
+        <div className="glass-banner border-amber-300/50 text-amber-50">
+          {catalogError}
+          <button
+            type="button"
+            onClick={() => setCatalogError(null)}
+            className="ml-3 underline hover:text-white"
+          >
+            Закрыть
+          </button>
+        </div>
+      )}
       {userDataLoading && isAuthenticated && (
-        <div className="border-b border-genshin-gold/30 bg-genshin-gold/10 px-4 py-2 text-center text-sm text-genshin-gold">
+        <div className="glass-banner border-genshin-gold/40 text-white">
           Загрузка...
         </div>
       )}
       {userDataError && (
-        <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-center text-sm text-red-300">
+        <div className="glass-banner border-red-300/50 text-red-50">
           {userDataError}
         </div>
       )}
       {actionError && (
-        <div className="border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-center text-sm text-red-300">
+        <div className="glass-banner border-red-300/50 text-red-50">
           {actionError}
           <button
             type="button"
@@ -560,7 +510,7 @@ export default function App() {
           </button>
         </div>
       )}
-      <main>
+      <main className="app-main">
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/characters" element={<CharactersPage />} />

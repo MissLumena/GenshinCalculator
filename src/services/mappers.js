@@ -2,16 +2,25 @@
  * Преобразование между форматом UI и строками Supabase.
  */
 import { ARTIFACT_SLOTS, slotsToSimplified, simplifiedToSlots, getDefaultArtifacts, normalizeArtifacts } from '../mockData';
+import { CHARACTER_NAME_RU } from '../characterNamesRu.js';
 
 function emptyArtifacts() {
   return simplifiedToSlots(getDefaultArtifacts());
 }
 
+function resolveCharacterNames(row) {
+  const nameEn = row.name_en || row.name || row.id;
+  const nameRu = CHARACTER_NAME_RU[row.id] ?? row.name_ru ?? nameEn;
+  return { nameEn, nameRu };
+}
+
 export function dbCharacterToFrontend(row) {
+  const { nameEn, nameRu } = resolveCharacterNames(row);
   return {
     id: row.id,
-    name: row.name_en,
-    nameRu: row.name_ru,
+    name: nameEn,
+    nameEn,
+    nameRu,
     element: row.element,
     weapon: row.weapon,
     rarity: row.rarity,

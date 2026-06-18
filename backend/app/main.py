@@ -1,5 +1,7 @@
 """Точка входа FastAPI."""
 
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,10 +9,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.routers import auth, builds, calculate, catalog, characters, teams
+from app.notion_client import NotionApiError, NotionClient
+from app.routers import auth, builds, calculate, catalog, characters, notion, teams
 
+logger = logging.getLogger('genshin_api')
 settings = get_settings()
 static_dir = Path(__file__).resolve().parent.parent / 'static'
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    logging.basicConfig(level=logging.INFO)
+    if settings.notion_startup_check and settings.notion_secret and settings.notion_database_id:
+        client = NotionClient(settings)
+        try:
+            client.verify_database()
+            logger.info('Notion database connection verified')
+        except NotionApiError as exc:
+            logger.error('Notion startup check failed: %s', exc.message)
+    yield
+
 
 app = FastAPI(
     title=settings.app_name,
@@ -18,6 +36,7 @@ app = FastAPI(
     version='0.1.0',
     docs_url='/docs',
     redoc_url='/redoc',
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -35,6 +54,7 @@ app.include_router(characters.router, prefix=api)
 app.include_router(teams.router, prefix=api)
 app.include_router(builds.router, prefix=api)
 app.include_router(calculate.router, prefix=api)
+app.include_router(notion.router, prefix=api)
 
 if static_dir.is_dir():
     app.mount('/tester', StaticFiles(directory=static_dir, html=True), name='tester')

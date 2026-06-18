@@ -1,25 +1,107 @@
--- Migration 004 — публичные результаты по имени (без email) и смена display_name
--- Запуск: Supabase → SQL Editor → Run целиком
--- После Run: Dashboard → Settings → API → Reload schema (если ошибка schema cache)
+-- =============================================================================
+-- Migration 004 — публичный список результатов по display_name
+-- Запуск: Supabase SQL Editor → Run, затем Settings → API → Reload schema
+-- =============================================================================
 
-CREATE OR REPLACE FUNCTION public.validate_display_name(p_name TEXT)
-RETURNS TEXT
+CREATE OR REPLACE FUNCTION public.list_public_results()
+RETURNS TABLE (
+    user_id UUID,
+    display_name TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+    SELECT
+        p.id AS user_id,
+        COALESCE(NULLIF(TRIM(p.display_name), ''), 'Игрок') AS display_name
+    FROM public.profiles p
+    WHERE EXISTS (
+        SELECT 1
+        FROM public.teams t
+        INNER JOIN public.team_members tm ON tm.team_id = t.id
+        WHERE t.user_id = p.id
+    )
+    ORDER BY display_name;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_public_user_results(p_user_id UUID)
+RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+STABLE
 AS $$
 DECLARE
-    trimmed TEXT;
+    v_team_id UUID;
+    v_display_name TEXT;
 BEGIN
-    trimmed := trim(p_name);
-    IF trimmed IS NULL OR trimmed = '' THEN
-        RAISE EXCEPTION 'Имя не может быть пустым' USING ERRCODE = '22023';
+    SELECT COALESCE(NULLIF(TRIM(display_name), ''), 'Игрок')
+    INTO v_display_name
+    FROM public.profiles
+    WHERE id = p_user_id;
+
+    IF v_display_name IS NULL THEN
+        RETURN NULL;
     END IF;
-    IF char_length(trimmed) < 2 OR char_length(trimmed) > 30 THEN
-        RAISE EXCEPTION 'Имя должно быть от 2 до 30 символов' USING ERRCODE = '22023';
+
+    SELECT t.id
+    INTO v_team_id
+    FROM public.teams t
+    LEFT JOIN public.profiles p ON p.id = p_user_id
+    WHERE t.user_id = p_user_id
+    ORDER BY
+        (p.active_team_id IS NOT NULL AND t.id = p.active_team_id) DESC,
+        t.is_default DESC NULLS LAST,
+        t.created_at ASC
+    LIMIT 1;
+
+    IF v_team_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'displayName', v_display_name,
+            'rotationSeconds', 20,
+            'team', '[]'::JSONB,
+            'configs', '[]'::JSONB
+        );
     END IF;
-    IF trimmed ~ '@' THEN
-        RAISE EXCEPTION 'Имя не должно содержать @' USING ERRCODE = '22023';
-    END IF;
-    RETURN trimmed;
+
+    RETURN jsonb_build_object(
+        'displayName', v_display_name,
+        'rotationSeconds', COALESCE((
+            SELECT rotation_seconds FROM public.teams WHERE id = v_team_id
+        ), 20),
+        'team', COALESCE((
+            SELECT jsonb_agg(uc.game_character_id ORDER BY tm.slot_index)
+            FROM public.team_members tm
+            INNER JOIN public.user_characters uc ON uc.id = tm.user_character_id
+            WHERE tm.team_id = v_team_id
+        ), '[]'::JSONB),
+        'configs', COALESCE((
+            SELECT jsonb_agg(
+                jsonb_build_object(
+                    'characterId', uc.game_character_id,
+                    'level', uc.level,
+                    'atk', jsonb_build_object(
+                        'base', uc.atk_base,
+                        'bonus', uc.atk_bonus
+                    ),
+                    'hp', uc.hp,
+                    'def', uc.defense,
+                    'em', uc.em,
+                    'critRate', uc.crit_rate,
+                    'critDmg', uc.crit_dmg,
+                    'energyRecharge', uc.energy_recharge,
+                    'constellation', uc.constellation,
+                    'artifacts', uc.artifacts_summary
+                )
+                ORDER BY tm.slot_index
+            )
+            FROM public.team_members tm
+            INNER JOIN public.user_characters uc ON uc.id = tm.user_character_id
+            WHERE tm.team_id = v_team_id
+        ), '[]'::JSONB)
+    );
 END;
 $$;
 
@@ -30,125 +112,27 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-    clean_name TEXT;
+    v_name TEXT;
 BEGIN
     IF auth.uid() IS NULL THEN
-        RAISE EXCEPTION 'Требуется авторизация' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'Not authenticated';
     END IF;
 
-    clean_name := public.validate_display_name(p_display_name);
+    v_name := NULLIF(TRIM(p_display_name), '');
+    IF v_name IS NULL OR char_length(v_name) > 100 THEN
+        RAISE EXCEPTION 'Invalid display name';
+    END IF;
 
     UPDATE public.profiles
-    SET display_name = clean_name
+    SET display_name = v_name
     WHERE id = auth.uid();
 
-    RETURN clean_name;
+    RETURN v_name;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.list_public_results()
-RETURNS TABLE (
-    user_id       UUID,
-    display_name  TEXT,
-    member_count  INT
-)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT
-        p.id,
-        COALESCE(NULLIF(trim(p.display_name), ''), 'Игрок') AS display_name,
-        COALESCE((
-            SELECT COUNT(*)::INT
-            FROM public.team_members tm
-            JOIN public.teams t ON t.id = tm.team_id
-            WHERE t.user_id = p.id
-        ), 0) AS member_count
-    FROM public.profiles p
-    WHERE auth.uid() IS NOT NULL
-      AND EXISTS (
-          SELECT 1 FROM public.user_characters uc WHERE uc.user_id = p.id
-      )
-    ORDER BY 2;
-$$;
-
-CREATE OR REPLACE FUNCTION public.get_public_user_results(p_user_id UUID)
-RETURNS JSONB
-LANGUAGE plpgsql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    result JSONB;
-    v_team_id UUID;
-    v_display_name TEXT;
-BEGIN
-    IF auth.uid() IS NULL THEN
-        RAISE EXCEPTION 'Требуется авторизация' USING ERRCODE = '42501';
-    END IF;
-
-    IF p_user_id IS NULL THEN
-        RAISE EXCEPTION 'Не указан пользователь' USING ERRCODE = '22023';
-    END IF;
-
-    SELECT COALESCE(NULLIF(trim(p.display_name), ''), 'Игрок')
-    INTO v_display_name
-    FROM public.profiles p
-    WHERE p.id = p_user_id;
-
-    IF v_display_name IS NULL THEN
-        RAISE EXCEPTION 'Пользователь не найден' USING ERRCODE = '22023';
-    END IF;
-
-    SELECT t.id INTO v_team_id
-    FROM public.teams t
-    WHERE t.user_id = p_user_id
-    ORDER BY t.is_default DESC, t.created_at ASC
-    LIMIT 1;
-
-    SELECT jsonb_build_object(
-        'userId', p_user_id,
-        'displayName', v_display_name,
-        'teamId', v_team_id,
-        'team', COALESCE((
-            SELECT jsonb_agg(uc.game_character_id ORDER BY tm.slot_index)
-            FROM public.team_members tm
-            JOIN public.user_characters uc ON uc.id = tm.user_character_id
-            WHERE tm.team_id = v_team_id
-        ), '[]'::JSONB),
-        'configs', COALESCE((
-            SELECT jsonb_agg(
-                jsonb_build_object(
-                    'characterId', uc.game_character_id,
-                    'level', uc.level,
-                    'atk', jsonb_build_object('base', uc.atk_base, 'bonus', uc.atk_bonus),
-                    'hp', uc.hp,
-                    'def', uc.defense,
-                    'em', uc.em,
-                    'critRate', uc.crit_rate,
-                    'critDmg', uc.crit_dmg,
-                    'energyRecharge', uc.energy_recharge,
-                    'constellation', uc.constellation,
-                    'artifacts', uc.artifacts_summary
-                )
-            )
-            FROM public.team_members tm
-            JOIN public.user_characters uc ON uc.id = tm.user_character_id
-            WHERE tm.team_id = v_team_id
-        ), '[]'::JSONB)
-    ) INTO result;
-
-    RETURN result;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.validate_display_name(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.list_public_results() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_public_user_results(UUID) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.update_my_display_name(TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.list_public_results() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_public_user_results(UUID) TO authenticated;
 
--- Обновить кэш PostgREST (Supabase API)
 NOTIFY pgrst, 'reload schema';

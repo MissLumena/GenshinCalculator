@@ -4,9 +4,20 @@
  */
 import { CHARACTERS, findCharacterById } from './characters';
 import { getCharacterIconUrl } from './characterIcons';
+import {
+  formatCharacterChartLabel,
+  getCharacterNameEn,
+  getCharacterNameRu,
+} from './lib/characterName';
 
 export { CHARACTERS };
-export { getCharacterIconUrl, getCharacterIconUrls } from './characterIcons';
+export {
+  getCharacterIconUrl,
+  getCharacterIconUrls,
+  getCharacterSplashUrls,
+  getCharacterSideIconUrl,
+  getCharacterConstellationPortraitUrls,
+} from './characterIcons';
 export const findCharacter = findCharacterById;
 
 export const ELEMENT_COLORS = {
@@ -53,15 +64,47 @@ export const ARTIFACT_SLOTS = [
 ];
 
 /** Описания созвездий (mock — одинаковый шаблон для всех) */
-export const CONSTELLATION_DESCRIPTIONS = [
-  'C0 — Базовые способности без дополнительных эффектов.',
-  'C1 — Улучшает Elemental Skill: снижает перезарядку на 20%.',
-  'C2 — Увеличивает CRIT Rate на 15% при использовании Burst.',
-  'C3 — Повышает уровень Elemental Skill на 3.',
-  'C4 — Нанесённый урон увеличивается на 25% при HP ниже 50%.',
-  'C5 — Повышает уровень Elemental Burst на 3.',
-  'C6 — Мощное улучшение: дополнительный удар при каждой 3-й атаке.',
+export const CONSTELLATION_ITEMS = [
+  {
+    level: 0,
+    title: 'Базовые способности',
+    description: 'Базовые способности без дополнительных эффектов.',
+  },
+  {
+    level: 1,
+    title: 'Улучшение навыка',
+    description: 'Улучшает Elemental Skill: снижает перезарядку на 20%.',
+  },
+  {
+    level: 2,
+    title: 'Критический импульс',
+    description: 'Увеличивает CRIT Rate на 15% при использовании Elemental Burst.',
+  },
+  {
+    level: 3,
+    title: 'Мастерство навыка',
+    description: 'Повышает уровень Elemental Skill на 3.',
+  },
+  {
+    level: 4,
+    title: 'Решительный удар',
+    description: 'Нанесённый урон увеличивается на 25% при HP ниже 50%.',
+  },
+  {
+    level: 5,
+    title: 'Мастерство взрыва',
+    description: 'Повышает уровень Elemental Burst на 3.',
+  },
+  {
+    level: 6,
+    title: 'Высшее созвездие',
+    description: 'Мощное улучшение: дополнительный удар при каждой 3-й атаке.',
+  },
 ];
+
+export const CONSTELLATION_DESCRIPTIONS = CONSTELLATION_ITEMS.map(
+  (item) => `C${item.level} — ${item.description}`,
+);
 
 /** Формулы для тултипов */
 export const FORMULAS = {
@@ -162,7 +205,9 @@ export function calculateMockDps(config, character) {
 
   return {
     characterId: character.id,
-    name: character.nameRu || character.name,
+    name: formatCharacterChartLabel(character),
+    nameRu: getCharacterNameRu(character),
+    nameEn: getCharacterNameEn(character),
     iconUrl: getCharacterIconUrl(character),
     constellation: config.constellation,
     skills: {

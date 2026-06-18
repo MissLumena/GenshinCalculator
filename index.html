@@ -3,6 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        background-color: #87b8d8;
+        background-image: url('/background/windrise.png');
+        background-position: center;
+        background-size: cover;
+        background-attachment: fixed;
+        color: #fff;
+        font-family: system-ui, sans-serif;
+      }
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(
+          165deg,
+          rgba(255, 255, 255, 0.12) 0%,
+          rgba(186, 230, 253, 0.08) 35%,
+          rgba(255, 255, 255, 0.06) 100%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+      #root { min-height: 100vh; position: relative; z-index: 1; }
+      #root .boot-loader {
+        padding: 1.25rem 1.5rem;
+        font-size: 1rem;
+        color: #fff;
+        text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -12,7 +44,41 @@
     <title>Genshin Calculator</title>
   </head>
   <body class="text-white">
-    <div id="root"></div>
+    <div id="root"><p class="boot-loader">Загрузка приложения…</p></div>
+    <script>
+      (function () {
+        var root = document.getElementById('root');
+
+        function showBootHelp(title, lines) {
+          if (!root || !root.querySelector('.boot-loader')) return;
+          root.innerHTML =
+            '<div style="padding:1.5rem;color:#fff;font-family:system-ui,sans-serif;max-width:720px">'
+            + '<h1 style="color:#fff;margin:0 0 1rem">' + title + '</h1>'
+            + lines.map(function (line) {
+              return '<p style="margin:0 0 0.75rem;line-height:1.5">' + line + '</p>';
+            }).join('')
+            + '</div>';
+        }
+
+        if (window.location.protocol === 'file:') {
+          showBootHelp('Откройте через dev-сервер', [
+            'Файл index.html нельзя открывать напрямую — браузер не выполнит React-код.',
+            'В терминале в папке проекта: <code style="background:rgba(0,0,0,0.35);padding:2px 6px;border-radius:6px">npm run dev</code>',
+            'Затем откройте адрес из терминала, например <code style="background:rgba(0,0,0,0.35);padding:2px 6px;border-radius:6px">http://localhost:5173</code>',
+          ]);
+          return;
+        }
+
+        window.setTimeout(function () {
+          showBootHelp('Приложение не запустилось', [
+            'JavaScript не загрузился или завершился с ошибкой.',
+            '1. Убедитесь, что выполнен <code style="background:rgba(0,0,0,0.35);padding:2px 6px;border-radius:6px">npm run dev</code> и страница открыта по адресу из терминала.',
+            '2. Нажмите F12 → вкладка Console и посмотрите красные ошибки.',
+            '3. Обновите страницу (Ctrl+F5).',
+          ]);
+        }, 12000);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

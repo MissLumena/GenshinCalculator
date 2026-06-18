@@ -1,117 +1,91 @@
 /**
- * Публичные результаты расчётов (только имена, без email).
+ * Публичный список результатов и загрузка расчёта пользователя.
  */
 import { getSupabaseClient } from '../lib/supabase';
-import { fromSupabaseError, badRequest } from '../lib/apiErrors';
-import { formatDisplayName } from '../lib/displayName';
+import { formatDisplayName, buildLocalResultsEntry, LOCAL_USER_ID } from '../lib/displayName';
 import { normalizeArtifacts } from '../mockData';
 
-function wrapError(error, context) {
-  return fromSupabaseError(error, context);
+const RPC_MISSING_HINT =
+  'Выполните миграцию backend/supabase/migrations/004_public_results_display_names.sql '
+  + 'в Supabase SQL Editor и перезагрузите схему (Settings → API → Reload schema).';
+
+function wrapSupabaseError(error, context) {
+  const message = error?.message || 'Неизвестная ошибка Supabase';
+  return new Error(`${context}: ${message}`);
 }
 
-function isMissingRpcError(error) {
+function isRpcMissingError(error) {
   const message = error?.message || '';
-  return (
-    error?.code === 'PGRST202'
-    || /schema cache/i.test(message)
-    || /could not find the function/i.test(message)
-  );
+  return message.includes('list_public_results')
+    || message.includes('get_public_user_results')
+    || message.includes('schema cache');
 }
 
-async function fetchResultsUsersFallback(supabase) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, display_name')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (profileError || !profile) return [];
-
-  const { count: charCount } = await supabase
-    .from('user_characters')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id);
-
-  if (!charCount) return [];
-
-  const { data: teamRow } = await supabase
-    .from('teams')
-    .select('id')
-    .eq('user_id', user.id)
-    .limit(1)
-    .maybeSingle();
-
-  let memberCount = 0;
-  if (teamRow?.id) {
-    const { count } = await supabase
-      .from('team_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('team_id', teamRow.id);
-    memberCount = count ?? 0;
+export function mapPublicResultsPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      displayName: formatDisplayName(null),
+      rotationSeconds: 20,
+      team: [],
+      configs: [],
+    };
   }
 
-  return [{
-    userId: profile.id,
-    displayName: formatDisplayName(profile.display_name),
-    memberCount,
-  }];
-}
+  const configs = Array.isArray(payload.configs)
+    ? payload.configs.map((config) => ({
+      ...config,
+      artifacts: normalizeArtifacts(config.artifacts),
+    }))
+    : [];
 
-/** @returns {Promise<Array<{ userId: string, displayName: string, memberCount: number }>>} */
-export async function fetchResultsUsers() {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    throw badRequest('Supabase не настроен');
-  }
-
-  const { data, error } = await supabase.rpc('list_public_results');
-  if (error) {
-    if (isMissingRpcError(error)) {
-      const fallback = await fetchResultsUsersFallback(supabase);
-      if (fallback.length > 0) {
-        return fallback;
-      }
-      throw badRequest(
-        'Функция list_public_results не найдена. Выполните миграцию '
-        + '004_public_results_display_names.sql в Supabase SQL Editor, '
-        + 'затем Settings → API → Reload schema.',
-      );
-    }
-    throw wrapError(error, 'Ошибка загрузки списка результатов');
-  }
-
-  return (data || []).map((row) => ({
-    userId: row.user_id,
-    displayName: formatDisplayName(row.display_name),
-    memberCount: row.member_count ?? 0,
-  }));
-}
-
-function mapConfigFromApi(raw) {
   return {
-    characterId: raw.characterId,
-    level: raw.level,
-    atk: raw.atk ?? { base: 0, bonus: 0 },
-    hp: raw.hp,
-    def: raw.def,
-    em: raw.em,
-    critRate: raw.critRate,
-    critDmg: raw.critDmg,
-    energyRecharge: raw.energyRecharge,
-    constellation: raw.constellation,
-    artifacts: normalizeArtifacts(raw.artifacts),
+    displayName: formatDisplayName(payload.displayName),
+    rotationSeconds: Number(payload.rotationSeconds) || 20,
+    team: Array.isArray(payload.team) ? payload.team.filter(Boolean) : [],
+    configs,
   };
 }
 
-/** @returns {Promise<{ userId: string, displayName: string, team: string[], configs: object[] }>} */
-export async function fetchUserResults(userId) {
+export async function fetchResultsUsers({ includeLocal = false } = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) {
-    throw badRequest('Supabase не настроен');
+    throw new Error('Supabase не настроен');
+  }
+
+  const { data, error } = await supabase.rpc('list_public_results');
+
+  if (error) {
+    if (isRpcMissingError(error)) {
+      const fallback = includeLocal ? [buildLocalResultsEntry()] : [];
+      return {
+        users: fallback,
+        rpcMissing: true,
+        hint: RPC_MISSING_HINT,
+      };
+    }
+    throw wrapSupabaseError(error, 'Ошибка загрузки списка результатов');
+  }
+
+  const users = (data || []).map((row) => ({
+    userId: row.user_id,
+    displayName: formatDisplayName(row.display_name),
+  }));
+
+  if (includeLocal) {
+    users.unshift(buildLocalResultsEntry());
+  }
+
+  return { users, rpcMissing: false, hint: null };
+}
+
+export async function fetchUserResults(userId) {
+  if (userId === LOCAL_USER_ID) {
+    return null;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error('Supabase не настроен');
   }
 
   const { data, error } = await supabase.rpc('get_public_user_results', {
@@ -119,39 +93,56 @@ export async function fetchUserResults(userId) {
   });
 
   if (error) {
-    if (isMissingRpcError(error)) {
-      throw badRequest(
-        'Функция get_public_user_results не найдена. Выполните миграцию '
-        + '004_public_results_display_names.sql в Supabase SQL Editor.',
-      );
+    if (isRpcMissingError(error)) {
+      const rpcError = new Error(RPC_MISSING_HINT);
+      rpcError.code = 'RPC_MISSING';
+      throw rpcError;
     }
-    throw wrapError(error, 'Ошибка загрузки расчёта');
+    throw wrapSupabaseError(error, 'Ошибка загрузки результатов пользователя');
   }
 
-  const payload = typeof data === 'string' ? JSON.parse(data) : data;
-  if (!payload) {
-    throw badRequest('Расчёт не найден');
+  if (!data) {
+    return null;
   }
 
-  const teamList = Array.isArray(payload.team) ? payload.team : [];
-
-  return {
-    userId: payload.userId,
-    displayName: formatDisplayName(payload.displayName),
-    team: teamList,
-    configs: (payload.configs || []).map(mapConfigFromApi),
-  };
+  return mapPublicResultsPayload(data);
 }
 
-/** Локальный расчёт без входа. */
-export function buildLocalResultsPayload(displayName, team, savedConfigs) {
-  return {
-    userId: 'local',
-    displayName: formatDisplayName(displayName, 'Гость'),
-    team: [...team],
-    configs: savedConfigs.map((c) => ({
-      ...c,
-      artifacts: normalizeArtifacts(c.artifacts),
-    })),
-  };
+export async function updateMyDisplayName(displayName) {
+  const trimmed = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!trimmed) {
+    throw new Error('Укажите имя');
+  }
+  if (trimmed.length > 100) {
+    throw new Error('Имя не должно быть длиннее 100 символов');
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error('Supabase не настроен');
+  }
+
+  const { data, error } = await supabase.rpc('update_my_display_name', {
+    p_display_name: trimmed,
+  });
+
+  if (error) {
+    if (isRpcMissingError(error)) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Не авторизован');
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ display_name: trimmed })
+        .eq('id', user.id);
+
+      if (updateError) {
+        throw wrapSupabaseError(updateError, 'Ошибка обновления имени');
+      }
+      return trimmed;
+    }
+    throw wrapSupabaseError(error, 'Ошибка обновления имени');
+  }
+
+  return formatDisplayName(data);
 }

@@ -228,3 +228,45 @@ class CalculateDpsResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     detail: str
+
+
+# --- Notion ---
+
+
+class NotionSaveResultRequest(BaseModel):
+    team_label: str = Field(min_length=1, max_length=500)
+    total_dps: float = Field(gt=0)
+    members: list[str] = Field(default_factory=list, max_length=4)
+    levels_label: str = Field(default='', max_length=200)
+    display_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator('members')
+    @classmethod
+    def trim_members(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item and item.strip()][:4]
+
+
+class NotionResultItem(BaseModel):
+    page_id: str
+    user_label: str
+    user_id: str
+    team_label: str
+    total_dps: float
+    calculated_at: str | None = None
+    levels_label: str = ''
+    members: list[str] = Field(default_factory=list)
+
+
+class NotionResultsResponse(BaseModel):
+    items: list[NotionResultItem]
+    unavailable: bool = False
+    message: str | None = None
+
+
+class NotionSaveResultResponse(BaseModel):
+    item: NotionResultItem
+
+
+class NotionWebhookResponse(BaseModel):
+    status: str
+    duplicate: bool = False

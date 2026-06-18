@@ -1,20 +1,26 @@
-/** Отображаемое имя пользователя (без email). */
+/**
+ * Отображаемое имя пользователя (без email).
+ */
+const DEFAULT_NAME = 'Игрок';
+const LOCAL_USER_ID = 'local';
+
+export { LOCAL_USER_ID };
+
+export function formatDisplayName(name) {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return trimmed || DEFAULT_NAME;
+}
 
 export function validateDisplayName(name) {
-  const value = String(name ?? '').trim();
-  if (!value) {
-    return 'Введите имя';
-  }
-  if (value.length < 2 || value.length > 30) {
-    return 'Имя должно быть от 2 до 30 символов';
-  }
-  if (value.includes('@')) {
-    return 'Имя не должно содержать @';
-  }
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (!trimmed) return 'Укажите имя';
+  if (trimmed.length > 100) return 'Имя не должно быть длиннее 100 символов';
   return null;
 }
 
-export function formatDisplayName(displayName, fallback = 'Игрок') {
-  const value = String(displayName ?? '').trim();
-  return value || fallback;
+export function buildLocalResultsEntry() {
+  return {
+    userId: LOCAL_USER_ID,
+    displayName: 'Вы (локально)',
+  };
 }
