@@ -17,6 +17,23 @@ import {
   getCharacterNameEn,
   getCharacterNameRu,
 } from './lib/characterName';
+import {
+  getWeaponIconUrls,
+  findWeaponById,
+  getWeaponsForType,
+  getEnrichedWeaponsGrouped,
+  getWeaponCatalogTotal,
+  normalizeWeaponType,
+  enrichWeapon,
+  WEAPON_TYPE_LABELS_RU,
+} from './weapons';
+import {
+  getEnrichedArtifactSets,
+  getArtifactSetIconUrls,
+  findArtifactSetById,
+  getArtifactCatalogTotal,
+  ARTIFACT_CATALOG_MAX_VERSION,
+} from './artifacts';
 
 /* ─── Подпись персонажа (RU + EN) ─── */
 export function CharacterNameLabel({
@@ -92,6 +109,603 @@ export function PageBackLink({ to, label, className = '' }) {
       <span className="text-base leading-none" aria-hidden="true">←</span>
       <span>{label}</span>
     </Link>
+  );
+}
+
+const WEAPON_ICON_SIZES = {
+  xs: 'h-8 w-8',
+  sm: 'h-10 w-10',
+  md: 'h-12 w-12',
+  lg: 'h-14 w-14',
+};
+
+export function WeaponIcon({ weaponId, size = 'sm', className = '', rarity = 5 }) {
+  const [urlIndex, setUrlIndex] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const sizeClass = WEAPON_ICON_SIZES[size] || WEAPON_ICON_SIZES.sm;
+  const weapon = findWeaponById(weaponId);
+  const urls = weaponId ? getWeaponIconUrls(weapon || weaponId) : [];
+  const currentUrl = urls[urlIndex];
+  const resolvedRarity = weapon?.rarity ?? rarity;
+
+  useEffect(() => {
+    setUrlIndex(0);
+    setFailed(false);
+  }, [weaponId]);
+
+  const handleError = () => {
+    if (urlIndex < urls.length - 1) {
+      setUrlIndex((index) => index + 1);
+      return;
+    }
+    setFailed(true);
+  };
+
+  if (!currentUrl || failed) {
+    const rarityTone = resolvedRarity >= 5 ? 'text-amber-200' : 'text-white/90';
+    return (
+      <div
+        className={`${sizeClass} flex shrink-0 items-center justify-center rounded-lg border border-white/25 bg-white/15 text-lg ${rarityTone} ${className}`}
+        aria-hidden="true"
+        title={weapon?.nameEn || ''}
+      >
+        ⚔
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={currentUrl}
+      alt={weapon?.nameEn || ''}
+      className={`${sizeClass} shrink-0 rounded-lg border border-white/20 bg-white/10 object-cover ${className}`}
+      loading="lazy"
+      onError={handleError}
+    />
+  );
+}
+
+function weaponMatchesQuery(weapon, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return weapon.nameEn.toLowerCase().includes(q)
+    || weapon.nameRu.toLowerCase().includes(q)
+    || (weapon.passiveName || '').toLowerCase().includes(q)
+    || (weapon.description || '').toLowerCase().includes(q);
+}
+
+function WeaponPickerCard({ weapon, selected, disabled, disabledReason, onSelect }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(weapon.id)}
+      title={disabled ? disabledReason : weapon.description}
+      className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${
+        disabled
+          ? 'cursor-not-allowed border-white/10 bg-slate-900/25 opacity-55'
+          : selected
+            ? 'border-genshin-gold bg-slate-900/70 ring-1 ring-genshin-gold/60'
+            : 'border-white/30 bg-slate-900/55 hover:bg-slate-900/70'
+      }`}
+    >
+      <WeaponIcon weaponId={weapon.id} size="lg" rarity={weapon.rarity} />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium leading-snug text-white">{weapon.nameRu}</p>
+        <p className="text-xs text-white/85">{weapon.nameEn} · {weapon.rarity}★</p>
+        {weapon.passiveName ? (
+          <p className="mt-1 text-xs font-semibold text-genshin-gold">{weapon.passiveName}</p>
+        ) : null}
+        {weapon.subStat ? (
+          <p className="text-[11px] text-white/75">Доп. стат: {weapon.subStat}</p>
+        ) : null}
+        {weapon.description ? (
+          <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-white/90">
+            {weapon.description}
+          </p>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+export function WeaponPicker({ characterWeaponType, value, onChange }) {
+  const [query, setQuery] = useState('');
+  const [viewMode, setViewMode] = useState('all');
+
+  const normalizedType = normalizeWeaponType(characterWeaponType);
+  const compatibleWeapons = useMemo(
+    () => getWeaponsForType(normalizedType).map(enrichWeapon),
+    [normalizedType],
+  );
+  const catalogTotal = getWeaponCatalogTotal();
+
+  const groupedWeapons = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filterList = (list) => list.filter((weapon) => weaponMatchesQuery(weapon, q));
+
+    if (viewMode === 'compatible') {
+      return [{
+        type: normalizedType,
+        label: WEAPON_TYPE_LABELS_RU[normalizedType] || normalizedType,
+        weapons: filterList(compatibleWeapons),
+        forCharacter: true,
+      }];
+    }
+
+    const groups = getEnrichedWeaponsGrouped()
+      .map((group) => ({
+        ...group,
+        forCharacter: group.type === normalizedType,
+        weapons: filterList(group.weapons),
+      }))
+      .filter((group) => group.weapons.length > 0);
+
+    const characterGroupIndex = groups.findIndex((group) => group.type === normalizedType);
+    if (characterGroupIndex > 0) {
+      const [characterGroup] = groups.splice(characterGroupIndex, 1);
+      groups.unshift(characterGroup);
+    }
+
+    return groups;
+  }, [compatibleWeapons, normalizedType, query, viewMode]);
+
+  const visibleCount = groupedWeapons.reduce((sum, group) => sum + group.weapons.length, 0);
+  const typeLabel = WEAPON_TYPE_LABELS_RU[normalizedType] || normalizedType;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-white/25 bg-slate-900/45 px-4 py-3">
+        <p className="text-sm font-medium text-white">
+          Каталог оружия · всего {catalogTotal}
+        </p>
+        <p className="mt-1 text-xs text-white/90">
+          Для персонажа ({typeLabel}): {compatibleWeapons.length}
+          {normalizedType ? '' : ' · тип оружия не распознан'}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setViewMode('all')}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+            viewMode === 'all'
+              ? 'bg-genshin-gold text-slate-900'
+              : 'border border-white/30 bg-slate-900/45 text-white hover:bg-slate-900/65'
+          }`}
+        >
+          Весь каталог ({catalogTotal})
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('compatible')}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+            viewMode === 'compatible'
+              ? 'bg-genshin-gold text-slate-900'
+              : 'border border-white/30 bg-slate-900/45 text-white hover:bg-slate-900/65'
+          }`}
+        >
+          Только {typeLabel.toLowerCase()} ({compatibleWeapons.length})
+        </button>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Поиск оружия..."
+          className="glass-input min-w-[12rem] flex-1 px-3 py-2 text-sm text-white sm:max-w-xs"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm text-white transition ${
+          !value
+            ? 'border-genshin-gold bg-slate-900/70 ring-1 ring-genshin-gold/60'
+            : 'border-white/30 bg-slate-900/55 hover:bg-slate-900/70'
+        }`}
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800/80 text-white/80">—</span>
+        <span className="font-medium text-white">Не выбрано</span>
+      </button>
+
+      {visibleCount === 0 ? (
+        <p className="rounded-xl border border-white/25 bg-slate-900/55 px-4 py-3 text-sm text-white">
+          Ничего не найдено. Сбросьте поиск или переключите режим каталога.
+        </p>
+      ) : (
+        <div className="max-h-[36rem] space-y-4 overflow-y-auto pr-1">
+          {groupedWeapons.map((group) => (
+            <section key={group.type || group.label}>
+              <h3 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+                <span>{group.label}</span>
+                <span className="rounded-full bg-slate-900/60 px-2 py-0.5 text-xs font-normal text-white/90">
+                  {group.weapons.length}
+                </span>
+                {group.forCharacter ? (
+                  <span className="rounded-full bg-genshin-gold/90 px-2 py-0.5 text-xs font-medium text-slate-900">
+                    для персонажа
+                  </span>
+                ) : null}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
+                {group.weapons.map((weapon) => {
+                  const canEquip = !normalizedType || weapon.type === normalizedType;
+                  return (
+                    <WeaponPickerCard
+                      key={weapon.id}
+                      weapon={weapon}
+                      selected={value === weapon.id}
+                      disabled={!canEquip}
+                      disabledReason={`Только ${typeLabel.toLowerCase()} для этого персонажа`}
+                      onSelect={onChange}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ArtifactSetIcon({ setId, size = 'md', className = '' }) {
+  const [urlIndex, setUrlIndex] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const sizes = { sm: 'h-10 w-10', md: 'h-12 w-12', lg: 'h-14 w-14' };
+  const sizeClass = sizes[size] || sizes.md;
+  const set = findArtifactSetById(setId);
+  const urls = setId ? getArtifactSetIconUrls(setId) : [];
+  const currentUrl = urls[urlIndex];
+
+  useEffect(() => {
+    setUrlIndex(0);
+    setFailed(false);
+  }, [setId]);
+
+  const handleError = () => {
+    if (urlIndex < urls.length - 1) {
+      setUrlIndex((index) => index + 1);
+      return;
+    }
+    setFailed(true);
+  };
+
+  if (!currentUrl || failed) {
+    return (
+      <div
+        className={`${sizeClass} flex shrink-0 items-center justify-center rounded-lg border border-white/25 bg-slate-800/70 text-lg text-amber-100 ${className}`}
+        title={set?.nameRu || ''}
+        aria-hidden="true"
+      >
+        ✦
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={currentUrl}
+      alt={set?.nameRu || ''}
+      className={`${sizeClass} shrink-0 rounded-lg border border-white/20 bg-slate-900/50 object-cover ${className}`}
+      loading="lazy"
+      onError={handleError}
+    />
+  );
+}
+
+function artifactSetMatchesQuery(set, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return set.nameRu.toLowerCase().includes(q)
+    || set.nameEn.toLowerCase().includes(q)
+    || set.bonus2.toLowerCase().includes(q)
+    || set.bonus4.toLowerCase().includes(q);
+}
+
+function ArtifactSetCard({ set, selected, disabled, disabledReason, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && onSelect(set.id)}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      className={`flex items-start gap-3 rounded-xl border p-3 text-left transition ${
+        disabled
+          ? 'cursor-not-allowed border-white/15 bg-slate-900/35 opacity-50'
+          : selected
+            ? 'border-genshin-gold bg-slate-900/70 ring-1 ring-genshin-gold/60'
+            : 'border-white/30 bg-slate-900/55 hover:bg-slate-900/70'
+      }`}
+    >
+      <ArtifactSetIcon setId={set.id} size="lg" />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium leading-snug text-white">{set.nameRu}</p>
+        <p className="text-xs text-white/85">{set.nameEn} · {set.maxRarity}★</p>
+        <p className="mt-1 text-xs text-genshin-gold">2pc: {set.bonus2}</p>
+        <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-white/90">4pc: {set.bonus4}</p>
+      </div>
+    </button>
+  );
+}
+
+export function ArtifactSetPicker({
+  value,
+  onChange,
+  title,
+  subtitle,
+  excludeSetId = null,
+  compact = false,
+  showCatalogHeader = true,
+  searchPlaceholder = 'Поиск сета...',
+}) {
+  const [query, setQuery] = useState('');
+  const catalogTotal = getArtifactCatalogTotal();
+  const allSets = useMemo(() => getEnrichedArtifactSets(), []);
+
+  const filteredSets = useMemo(() => {
+    return allSets.filter((set) => artifactSetMatchesQuery(set, query));
+  }, [allSets, query]);
+
+  const selectedSet = findArtifactSetById(value);
+  const listMaxHeight = compact ? 'max-h-[20rem]' : 'max-h-[36rem]';
+
+  return (
+    <div className="space-y-3">
+      {showCatalogHeader ? (
+        <div className="rounded-xl border border-white/25 bg-slate-900/45 px-4 py-3">
+          <p className="text-sm font-medium text-white">
+            {title || `Каталог артефактов · всего ${catalogTotal}`}
+          </p>
+          <p className="mt-1 text-xs text-white/90">
+            {subtitle || `Все сеты до версии ${ARTIFACT_CATALOG_MAX_VERSION} включительно`}
+          </p>
+        </div>
+      ) : title ? (
+        <div>
+          <p className="text-sm font-medium text-white">{title}</p>
+          {subtitle ? <p className="mt-1 text-xs text-white/85">{subtitle}</p> : null}
+        </div>
+      ) : null}
+
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={searchPlaceholder}
+        className="glass-input w-full px-3 py-2 text-sm text-white"
+      />
+
+      {selectedSet ? (
+        <div className="flex gap-3 rounded-xl border border-genshin-gold/50 bg-slate-900/55 p-3">
+          <ArtifactSetIcon setId={selectedSet.id} size="lg" />
+          <div className="min-w-0">
+            <p className="font-semibold text-white">{selectedSet.nameRu}</p>
+            <p className="text-xs text-white/85">{selectedSet.nameEn}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {filteredSets.length === 0 ? (
+        <p className="rounded-xl border border-white/25 bg-slate-900/55 px-4 py-3 text-sm text-white">
+          Ничего не найдено. Сбросьте поиск.
+        </p>
+      ) : (
+        <div className={`grid ${listMaxHeight} gap-3 overflow-y-auto pr-1 sm:grid-cols-1 lg:grid-cols-2`}>
+          {filteredSets.map((set) => {
+            const disabled = Boolean(excludeSetId && set.id === excludeSetId);
+            return (
+              <ArtifactSetCard
+                key={set.id}
+                set={set}
+                selected={value === set.id}
+                disabled={disabled}
+                disabledReason="Уже выбран как основной сет"
+                onSelect={onChange}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ARTIFACT_LOADOUT_MODES = {
+  single: 'single',
+  dual: 'dual',
+};
+
+export function DualArtifactSetPicker({ set, set2, onChange }) {
+  const [loadoutMode, setLoadoutMode] = useState(set2 ? ARTIFACT_LOADOUT_MODES.dual : ARTIFACT_LOADOUT_MODES.single);
+  const [activeSlot, setActiveSlot] = useState('primary');
+  const primarySet = findArtifactSetById(set);
+  const secondarySet = set2 ? findArtifactSetById(set2) : null;
+  const catalogTotal = getArtifactCatalogTotal();
+  const isDualLoadout = loadoutMode === ARTIFACT_LOADOUT_MODES.dual;
+
+  useEffect(() => {
+    if (set2) setLoadoutMode(ARTIFACT_LOADOUT_MODES.dual);
+  }, [set2]);
+
+  const switchLoadoutMode = (mode) => {
+    setLoadoutMode(mode);
+    setActiveSlot('primary');
+    if (mode === ARTIFACT_LOADOUT_MODES.single) {
+      onChange({ set, set2: null });
+      return;
+    }
+    onChange({ set, set2 });
+  };
+
+  const handleCatalogChange = (setId) => {
+    if (!isDualLoadout || activeSlot === 'primary') {
+      const nextSet2 = set2 === setId ? null : set2;
+      onChange({ set: setId, set2: nextSet2 });
+      return;
+    }
+    onChange({ set, set2: setId });
+  };
+
+  const catalogValue = isDualLoadout && activeSlot === 'secondary' ? set2 : set;
+  const catalogExcludeId = isDualLoadout && activeSlot === 'secondary' ? set : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border-2 border-genshin-gold/60 bg-gradient-to-br from-slate-900/90 to-slate-800/70 p-4 shadow-lg shadow-genshin-gold/10">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold text-white">Тип сборки артефактов</p>
+            <p className="mt-1 text-xs text-white/85">
+              Каталог до версии {ARTIFACT_CATALOG_MAX_VERSION} · {catalogTotal} сетов
+            </p>
+          </div>
+          {isDualLoadout ? (
+            <span className="rounded-full bg-genshin-gold px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-900">
+              4 + 2
+            </span>
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => switchLoadoutMode(ARTIFACT_LOADOUT_MODES.single)}
+            className={`rounded-xl border px-4 py-3 text-left transition ${
+              !isDualLoadout
+                ? 'border-genshin-gold bg-genshin-gold/20 ring-2 ring-genshin-gold/50'
+                : 'border-white/25 bg-slate-900/55 hover:border-white/40'
+            }`}
+          >
+            <p className="font-semibold text-white">Один сет · 5 шт.</p>
+            <p className="mt-1 text-xs text-white/85">2pc + 4pc одного сета</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchLoadoutMode(ARTIFACT_LOADOUT_MODES.dual)}
+            className={`rounded-xl border px-4 py-3 text-left transition ${
+              isDualLoadout
+                ? 'border-genshin-gold bg-genshin-gold/20 ring-2 ring-genshin-gold/50'
+                : 'border-white/25 bg-slate-900/55 hover:border-white/40'
+            }`}
+          >
+            <p className="font-semibold text-white">Два сета · 4 + 2</p>
+            <p className="mt-1 text-xs text-white/85">4pc основного + 2pc второго</p>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-genshin-gold/40 bg-slate-900/60 px-4 py-3">
+        <span className="text-xs font-medium uppercase tracking-wide text-genshin-gold">Сборка:</span>
+        {primarySet ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSlot('primary');
+              if (!isDualLoadout) return;
+              setLoadoutMode(ARTIFACT_LOADOUT_MODES.dual);
+            }}
+            className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 text-sm transition ${
+              activeSlot === 'primary'
+                ? 'border-genshin-gold bg-genshin-gold/15 text-white'
+                : 'border-white/25 bg-slate-900/70 text-white hover:border-white/40'
+            }`}
+          >
+            <ArtifactSetIcon setId={primarySet.id} size="sm" />
+            {primarySet.nameRu}
+            <span className="text-xs text-genshin-gold">{isDualLoadout ? '×4' : '×5'}</span>
+          </button>
+        ) : (
+          <span className="text-sm text-white/70">Основной сет не выбран</span>
+        )}
+        {isDualLoadout ? (
+          <>
+            <span className="text-white/60">+</span>
+            {secondarySet ? (
+              <button
+                type="button"
+                onClick={() => setActiveSlot('secondary')}
+                className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 text-sm transition ${
+                  activeSlot === 'secondary'
+                    ? 'border-genshin-gold bg-genshin-gold/15 text-white'
+                    : 'border-white/25 bg-slate-900/70 text-white hover:border-white/40'
+                }`}
+              >
+                <ArtifactSetIcon setId={secondarySet.id} size="sm" />
+                {secondarySet.nameRu}
+                <span className="text-xs text-genshin-gold">×2</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setActiveSlot('secondary')}
+                className={`rounded-lg border px-3 py-1 text-sm transition ${
+                  activeSlot === 'secondary'
+                    ? 'border-genshin-gold bg-genshin-gold/15 text-white'
+                    : 'border-dashed border-white/35 text-white/85 hover:border-white/55'
+                }`}
+              >
+                + Выберите 2pc сет
+              </button>
+            )}
+          </>
+        ) : null}
+      </div>
+
+      {isDualLoadout ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveSlot('primary')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              activeSlot === 'primary'
+                ? 'bg-genshin-gold text-slate-900'
+                : 'bg-slate-900/70 text-white hover:bg-slate-800'
+            }`}
+          >
+            Редактировать сет 1 (4pc)
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSlot('secondary')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              activeSlot === 'secondary'
+                ? 'bg-genshin-gold text-slate-900'
+                : 'bg-slate-900/70 text-white hover:bg-slate-800'
+            }`}
+          >
+            Редактировать сет 2 (2pc)
+          </button>
+        </div>
+      ) : null}
+
+      <ArtifactSetPicker
+        value={catalogValue}
+        onChange={handleCatalogChange}
+        title={
+          isDualLoadout
+            ? (activeSlot === 'secondary' ? 'Каталог · второй сет (2pc)' : 'Каталог · основной сет (4pc)')
+            : `Каталог артефактов · всего ${catalogTotal}`
+        }
+        subtitle={
+          isDualLoadout
+            ? (activeSlot === 'secondary'
+              ? 'Выберите сет для 2-piece бонуса'
+              : 'Выберите сет для 4-piece бонуса')
+            : `Все сеты до версии ${ARTIFACT_CATALOG_MAX_VERSION} включительно`
+        }
+        excludeSetId={catalogExcludeId}
+        showCatalogHeader
+        searchPlaceholder={
+          isDualLoadout && activeSlot === 'secondary'
+            ? 'Поиск второго сета...'
+            : 'Поиск сета...'
+        }
+      />
+    </div>
   );
 }
 
@@ -521,9 +1135,9 @@ export function Tooltip({ text, formula, children }) {
     >
       {children}
       {show && (
-        <span className="glass-modal absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 p-2 text-xs text-gray-200">
+        <span className="glass-modal absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 p-2 text-xs text-white/90">
           <span className="block font-medium text-white">{text}</span>
-          {formula && <span className="mt-1 block font-mono text-gray-400">{formula}</span>}
+          {formula && <span className="mt-1 block font-mono text-white/75">{formula}</span>}
         </span>
       )}
     </span>
@@ -580,7 +1194,7 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
 
   const field = (
     <label className="block">
-      <span className="mb-1 block text-sm text-gray-400">{label}</span>
+      <span className="mb-1 block text-sm text-white/85">{label}</span>
       <div className="flex items-center gap-1">
         <input
           ref={inputRef}
@@ -591,9 +1205,9 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
           step={step}
           onChange={handleChange}
           onBlur={handleBlur}
-          className="glass-input w-full px-3 py-2"
+          className="glass-input w-full px-3 py-2 text-white"
         />
-        {suffix && <span className="text-sm text-gray-400">{suffix}</span>}
+        {suffix && <span className="text-sm text-white/85">{suffix}</span>}
       </div>
     </label>
   );

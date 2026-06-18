@@ -10,6 +10,7 @@ import {
 } from './mappers';
 import { fetchTeamComposition } from './teamService';
 import { formatDisplayName } from '../lib/displayName';
+import { resolveArtifactSetId, DEFAULT_ARTIFACT_SET_ID } from '../artifacts';
 
 const DEFAULT_TEAM_NAME = 'Основная команда';
 
@@ -204,7 +205,7 @@ export async function upsertUserCharacter(userId, config) {
     userCharacterId = data.id;
   }
 
-  const artifactSetId = config.artifacts?.set || 'crimson';
+  const artifactSetId = resolveArtifactSetId(config.artifacts?.set || DEFAULT_ARTIFACT_SET_ID);
   const { data: artifactSet, error: setLookupError } = await supabase
     .from('artifact_sets')
     .select('id')

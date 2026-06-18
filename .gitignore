@@ -85,3 +85,9 @@ prettier.config.js
 
 # Vitest (если появится локальный кэш)
 .vitest/
+
+# Playwright
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

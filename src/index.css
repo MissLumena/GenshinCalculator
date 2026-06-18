@@ -227,6 +227,11 @@ body::before {
     border-color: var(--glass-border-strong);
   }
 
+  .select-field option {
+    background-color: #1e3a5f;
+    color: #fff;
+  }
+
   .showcase-card {
     @apply relative aspect-[3/4] overflow-hidden rounded-[1.75rem] shadow-glass backdrop-blur-lg transition duration-300 hover:-translate-y-1 hover:shadow-glass-lg;
     background-color: var(--glass-fill-soft);

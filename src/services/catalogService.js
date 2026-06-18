@@ -9,6 +9,7 @@ import {
   dbArtifactSetToFrontend,
   dbCharacterToFrontend,
   mergeCharacters,
+  mergeArtifactSets,
 } from './mappers';
 
 function wrapSupabaseError(error, context) {
@@ -47,7 +48,7 @@ export async function fetchCatalog() {
 
   return {
     characters: mergeCharacters(dbCharacters, CHARACTERS),
-    artifactSets: dbArtifactSets.length > 0 ? dbArtifactSets : LOCAL_ARTIFACT_SETS,
+    artifactSets: mergeArtifactSets(dbArtifactSets, LOCAL_ARTIFACT_SETS),
     fromSupabase: true,
   };
 }

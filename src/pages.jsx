@@ -20,6 +20,10 @@ import {
   ModalOverlay,
   CharacterShowcaseCard,
   CharacterNameLabel,
+  WeaponPicker,
+  WeaponIcon,
+  DualArtifactSetPicker,
+  ArtifactSetIcon,
 } from './components';
 import {
   ARTIFACT_SUMMARY_FIELDS,
@@ -29,6 +33,19 @@ import {
   calculateMockDps,
   normalizeArtifacts,
 } from './mockData';
+import {
+  findWeaponById,
+  getWeaponLabel,
+  getWeaponsForType,
+  getWeaponCatalogTotal,
+  getWeaponMeta,
+  normalizeWeaponType,
+} from './weapons';
+import {
+  findArtifactSetById,
+  getArtifactCatalogTotal,
+  ARTIFACT_CATALOG_MAX_VERSION,
+} from './artifacts';
 import { CHARACTER_REGIONS } from './characters';
 import { useAppState } from './context';
 import { useCharacterConfigEditor } from './hooks/useCharacterConfigEditor';
@@ -180,11 +197,12 @@ export function CharactersPage() {
 }
 
 /* ═══════════════════════════════════════════
-   3. Настройки персонажа (4 вкладки)
+   3. Настройки персонажа (5 вкладок)
    ═══════════════════════════════════════════ */
 const TABS = [
   { key: 'stats', label: 'Базовые статы' },
   { key: 'crit', label: 'Крит & Энергия' },
+  { key: 'weapon', label: 'Оружие' },
   { key: 'artifacts', label: 'Артефакты' },
   { key: 'const', label: 'Созвездия' },
 ];
@@ -228,18 +246,40 @@ export function CharacterSettingsPage() {
   if (!character) {
     return (
       <div className="px-4 py-12 text-center">
-        <p className="text-gray-400">Персонаж не найден</p>
+        <p className="text-white/85">Персонаж не найден</p>
         <Link to="/team" className="mt-4 inline-block text-white">← К команде</Link>
       </div>
     );
   }
 
   const setBonus = getSetBonuses(config.artifacts, artifactSets);
+  const characterWeaponType = normalizeWeaponType(character.weapon);
+  const compatibleWeaponCount = useMemo(
+    () => getWeaponsForType(characterWeaponType).length,
+    [characterWeaponType],
+  );
+  const catalogTotal = getWeaponCatalogTotal();
+  const artifactCatalogTotal = getArtifactCatalogTotal();
+  const selectedWeapon = getWeaponMeta(config.equippedWeaponId);
+  const selectedSecondaryArtifactSet = config.artifacts.set2
+    ? findArtifactSetById(config.artifacts.set2)
+    : null;
+  const bonusSetIds = useMemo(
+    () => [...new Set(setBonus.map((bonus) => bonus.setId).filter(Boolean))],
+    [setBonus],
+  );
 
   const updateArtifactField = (field, value) => {
     patchConfig((prev) => ({
       ...prev,
       artifacts: { ...prev.artifacts, [field]: value },
+    }));
+  };
+
+  const updateArtifactSets = ({ set, set2 }) => {
+    patchConfig((prev) => ({
+      ...prev,
+      artifacts: { ...prev.artifacts, set, set2: set2 || null },
     }));
   };
 
@@ -258,18 +298,26 @@ export function CharacterSettingsPage() {
       {/* Заголовок персонажа */}
       <div className="mb-6 flex items-center gap-4">
         <CharacterAvatar character={character} size="xl" />
+        {selectedWeapon ? (
+          <WeaponIcon weaponId={selectedWeapon.id} size="md" rarity={selectedWeapon.rarity} />
+        ) : null}
         <div>
           <CharacterNameLabel
             character={character}
             primaryClassName="text-2xl font-bold text-white"
-            secondaryClassName="text-gray-400"
+            secondaryClassName="text-sm text-white/75"
           />
-          <p className="mt-1 text-gray-400">{character.element} · {character.weapon} · {character.rarity}★</p>
+          <p className="mt-1 text-white/90">
+            {character.element} · {character.weapon} · {character.rarity}★
+            {selectedWeapon ? (
+              <span className="text-white"> · {getWeaponLabel(config.equippedWeaponId)}</span>
+            ) : null}
+          </p>
         </div>
       </div>
 
       {/* Вкладки */}
-      <div className="mb-6 flex flex-wrap gap-1 border-b border-gray-700">
+      <div className="mb-6 flex flex-wrap gap-1 border-b border-white/20">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -278,10 +326,27 @@ export function CharacterSettingsPage() {
             className={`px-4 py-2 text-sm transition ${
               tab === t.key
                 ? 'border-b-2 border-genshin-gold text-white'
-                : 'text-gray-400 hover:text-white'
+                : 'text-white/75 hover:text-white'
             }`}
           >
             {t.label}
+            {t.key === 'weapon' ? (
+              <span className="ml-1.5 rounded-full bg-genshin-gold/90 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900">
+                {catalogTotal}
+              </span>
+            ) : null}
+            {t.key === 'artifacts' ? (
+              <>
+                <span className="ml-1.5 rounded-full bg-genshin-gold/90 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900">
+                  {artifactCatalogTotal}
+                </span>
+                {config.artifacts.set2 ? (
+                  <span className="ml-1 rounded-full border border-genshin-gold/80 bg-genshin-gold/20 px-1.5 py-0.5 text-[10px] font-semibold text-genshin-gold">
+                    4+2
+                  </span>
+                ) : null}
+              </>
+            ) : null}
           </button>
         ))}
       </div>
@@ -328,24 +393,56 @@ export function CharacterSettingsPage() {
         </div>
       )}
 
+      {/* ── Оружие ── */}
+      {tab === 'weapon' && (
+        <div className="space-y-4">
+          <div className="glass-panel-sm p-4">
+            {compatibleWeaponCount === 0 ? (
+              <p className="mb-4 rounded-xl border border-amber-300/40 bg-amber-500/20 px-3 py-2 text-sm text-white">
+                Не удалось определить тип оружия персонажа («{character.weapon}»). Показан полный каталог {catalogTotal} оружий.
+              </p>
+            ) : (
+              <p className="mb-4 text-sm text-white">
+                Персонаж использует «{characterWeaponType}» · доступно {compatibleWeaponCount} из {catalogTotal}
+              </p>
+            )}
+            {selectedWeapon ? (
+              <div className="mb-4 flex gap-3 rounded-xl border border-genshin-gold/50 bg-slate-900/55 p-4">
+                <WeaponIcon weaponId={selectedWeapon.id} size="lg" rarity={selectedWeapon.rarity} />
+                <div className="min-w-0">
+                  <p className="font-semibold text-white">{selectedWeapon.nameRu}</p>
+                  <p className="text-xs text-white/85">{selectedWeapon.nameEn} · {selectedWeapon.rarity}★</p>
+                  {selectedWeapon.passiveName ? (
+                    <p className="mt-1 text-sm font-medium text-genshin-gold">{selectedWeapon.passiveName}</p>
+                  ) : null}
+                  {selectedWeapon.description ? (
+                    <p className="mt-2 text-sm leading-relaxed text-white/90">{selectedWeapon.description}</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            <WeaponPicker
+              characterWeaponType={characterWeaponType}
+              value={config.equippedWeaponId}
+              onChange={(weaponId) => patchConfig({ equippedWeaponId: weaponId })}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Артефакты ── */}
       {tab === 'artifacts' && (
         <div className="space-y-6">
           <div className="glass-panel-sm p-4">
-            <label className="mb-4 block">
-              <span className="mb-1 block text-sm text-gray-400">Сет</span>
-              <select
-                value={config.artifacts.set}
-                onChange={(e) => updateArtifactField('set', e.target.value)}
-                className="select-field w-full"
-              >
-                {artifactSets.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </label>
+            <DualArtifactSetPicker
+              set={config.artifacts.set}
+              set2={config.artifacts.set2}
+              onChange={updateArtifactSets}
+            />
+          </div>
 
-            <h3 className="mb-3 text-sm font-medium text-gray-400">Основной стат</h3>
+          <div className="glass-panel-sm p-4">
+            <h3 className="mb-3 text-sm font-medium text-white">Сводка статов</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               {ARTIFACT_SUMMARY_FIELDS.map(({ key, label }) => (
                 <InputField
@@ -362,9 +459,17 @@ export function CharacterSettingsPage() {
 
           {setBonus.length > 0 && (
             <div className="glass-panel-sm border-genshin-gold/30 bg-genshin-gold/10 p-4">
-              <h3 className="mb-2 font-medium text-white">Бонусы сетов</h3>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {bonusSetIds.map((setId) => (
+                  <ArtifactSetIcon key={setId} setId={setId} size="sm" />
+                ))}
+                <h3 className="font-medium text-white">
+                  Бонусы сетов
+                  {selectedSecondaryArtifactSet ? ' (4+2)' : null}
+                </h3>
+              </div>
               {setBonus.map((b, i) => (
-                <p key={i} className="text-sm text-gray-300">
+                <p key={i} className="text-sm text-white/90">
                   <Tooltip text={`${b.set} (${b.pieces}pc)`} formula={FORMULAS.setBonus}>
                     <span className="cursor-help underline decoration-dotted">{b.set} ({b.pieces}pc):</span>
                   </Tooltip>{' '}
@@ -390,10 +495,10 @@ export function CharacterSettingsPage() {
         <ActionButton onClick={() => setShowSaveModal(true)}>Сохранить</ActionButton>
         <ActionButton variant="secondary" onClick={handleBackToTeam}>Назад к команде</ActionButton>
         {saveState === 'pending' && (
-          <span className="text-sm text-gray-400">Изменения сохраняются...</span>
+          <span className="text-sm text-white/85">Изменения сохраняются...</span>
         )}
         {saveState === 'saving' && (
-          <span className="text-sm text-gray-400">Сохранение...</span>
+          <span className="text-sm text-white/85">Сохранение...</span>
         )}
         {saveState === 'saved' && (
           <span className="text-sm text-green-300">Сохранено</span>

@@ -3,6 +3,11 @@
  * Персонажи вынесены в characters.js; здесь — артефакты, формулы и расчёт.
  */
 import { CHARACTERS, findCharacterById } from './characters';
+import {
+  DEFAULT_ARTIFACT_SET_ID,
+  resolveArtifactSetId,
+  getLegacyArtifactSetsForBonuses,
+} from './artifacts';
 import { getCharacterIconUrl } from './characterIcons';
 import {
   formatCharacterChartLabel,
@@ -31,17 +36,8 @@ export const ELEMENT_COLORS = {
   Physical: 'bg-gray-500',
 };
 
-/** Сеты артефактов с бонусами 2pc / 4pc */
-export const ARTIFACT_SETS = [
-  { id: 'crimson', name: 'Crimson Witch of Flames', bonus2: 'Pyro DMG +15%', bonus4: 'Increases Overloaded, Burning, and Pyro DMG by 40%' },
-  { id: 'shimenawa', name: 'Shimenawa\'s Reminiscence', bonus2: 'ATK +18%', bonus4: 'Normal/Charged/Plunging DMG +50% when off-field' },
-  { id: 'emblem', name: 'Emblem of Severed Fate', bonus2: 'ER +20%', bonus4: 'Burst DMG +25% of ER (max 75%)' },
-  { id: 'gladiator', name: 'Gladiator\'s Finale', bonus2: 'ATK +18%', bonus4: 'Normal ATK DMG +35% (Sword/Claymore/Polearm)' },
-  { id: 'wanderer', name: 'Wanderer\'s Troupe', bonus2: 'Elemental Mastery +80', bonus4: 'Charged ATK DMG +35% (Catalyst/Bow)' },
-  { id: 'noblesse', name: 'Noblesse Oblige', bonus2: 'Burst DMG +20%', bonus4: 'Using Burst increases party ATK by 20% for 12s' },
-  { id: 'heart-of-depth', name: 'Heart of Depth', bonus2: 'Hydro DMG +15%', bonus4: 'Normal/Charged ATK DMG +30% for 15s after Skill' },
-  { id: 'viridescent', name: 'Viridescent Venerer', bonus2: 'Anemo DMG +15%', bonus4: 'Swirl reduces enemy RES by 40% for 10s' },
-];
+/** Сеты артефактов с бонусами 2pc / 4pc (полный каталог ≤ 6.6) */
+export const ARTIFACT_SETS = getLegacyArtifactSetsForBonuses();
 
 /** Основные статы по слотам артефактов */
 export const MAIN_STATS = {
@@ -125,13 +121,43 @@ export const ARTIFACT_SUMMARY_FIELDS = [
 
 export function getDefaultArtifacts() {
   return {
-    set: 'crimson',
+    set: DEFAULT_ARTIFACT_SET_ID,
+    set2: null,
     hp: 0,
     critRate: 0,
     critDmg: 0,
     atkPercent: 0,
     em: 0,
   };
+}
+
+function inferSetsFromSlots(slots) {
+  const counts = {};
+  for (const slot of Object.values(slots)) {
+    if (slot?.set) {
+      const id = resolveArtifactSetId(slot.set);
+      counts[id] = (counts[id] || 0) + 1;
+    }
+  }
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const primarySet = sorted[0]?.[0] || DEFAULT_ARTIFACT_SET_ID;
+  let secondarySet = null;
+
+  if (sorted.length > 1) {
+    const [, secondaryCount] = sorted[1];
+    if (secondaryCount >= 2) {
+      secondarySet = sorted[1][0];
+    } else if (sorted[0][1] === 4 && secondaryCount >= 1) {
+      secondarySet = sorted[1][0];
+    }
+  }
+
+  if (secondarySet === primarySet) {
+    secondarySet = null;
+  }
+
+  return { set: primarySet, set2: secondarySet };
 }
 
 /** Слоты БД → упрощённый формат UI */
@@ -146,8 +172,11 @@ export function slotsToSimplified(slots) {
     return 0;
   };
 
+  const { set, set2 } = inferSetsFromSlots(slots);
+
   return {
-    set: slots.flower.set || 'crimson',
+    set,
+    set2,
     hp: pickStat(['HP']),
     critRate: pickStat(['CRIT Rate']),
     critDmg: pickStat(['CRIT DMG']),
@@ -158,22 +187,34 @@ export function slotsToSimplified(slots) {
 
 /** Упрощённый формат → слоты для Supabase */
 export function simplifiedToSlots(artifacts) {
-  const set = artifacts.set || 'crimson';
+  const primarySet = resolveArtifactSetId(artifacts.set || DEFAULT_ARTIFACT_SET_ID);
+  const secondarySet = artifacts.set2
+    ? resolveArtifactSetId(artifacts.set2)
+    : primarySet;
   const stat = (name, value) => [{ stat: name, value: value ?? 0 }];
 
   return {
-    flower: { set, mainStat: 'HP', substats: stat('HP', artifacts.hp) },
-    plume: { set, mainStat: 'ATK', substats: stat('CRIT Rate', artifacts.critRate) },
-    sands: { set, mainStat: 'ATK%', substats: stat('CRIT DMG', artifacts.critDmg) },
-    goblet: { set, mainStat: 'ATK%', substats: stat('ATK%', artifacts.atkPercent) },
-    circlet: { set, mainStat: 'CRIT Rate', substats: stat('EM', artifacts.em) },
+    flower: { set: primarySet, mainStat: 'HP', substats: stat('HP', artifacts.hp) },
+    plume: { set: secondarySet, mainStat: 'ATK', substats: stat('CRIT Rate', artifacts.critRate) },
+    sands: { set: primarySet, mainStat: 'ATK%', substats: stat('CRIT DMG', artifacts.critDmg) },
+    goblet: { set: primarySet, mainStat: 'ATK%', substats: stat('ATK%', artifacts.atkPercent) },
+    circlet: { set: secondarySet, mainStat: 'CRIT Rate', substats: stat('EM', artifacts.em) },
   };
 }
 
 /** Поддержка старого формата из localStorage */
 export function normalizeArtifacts(artifacts) {
   if (artifacts?.set != null && artifacts.hp !== undefined) {
-    return { ...getDefaultArtifacts(), ...artifacts };
+    const set = resolveArtifactSetId(artifacts.set);
+    let set2 = artifacts.set2 ? resolveArtifactSetId(artifacts.set2) : null;
+    if (set2 === set) set2 = null;
+
+    return {
+      ...getDefaultArtifacts(),
+      ...artifacts,
+      set,
+      set2,
+    };
   }
   if (artifacts?.flower) return slotsToSimplified(artifacts);
   return getDefaultArtifacts();
@@ -193,6 +234,7 @@ export function getDefaultConfig(character) {
     energyRecharge: 120,
     constellation: 0,
     artifacts: getDefaultArtifacts(),
+    equippedWeaponId: null,
   };
 }
 
@@ -219,15 +261,42 @@ export function calculateMockDps(config, character) {
   };
 }
 
+function findArtifactSetEntry(setId, artifactSets) {
+  return artifactSets.find((s) => s.id === setId)
+    || artifactSets.find((s) => resolveArtifactSetId(s.id) === setId);
+}
+
 export function getSetBonuses(artifacts, artifactSets = ARTIFACT_SETS) {
   const normalized = normalizeArtifacts(artifacts);
 
   if (normalized.set) {
-    const set = artifactSets.find((s) => s.id === normalized.set);
-    if (!set) return [];
+    const primarySet = findArtifactSetEntry(normalized.set, artifactSets);
+    if (!primarySet) return [];
+
+    if (normalized.set2) {
+      const secondarySet = findArtifactSetEntry(normalized.set2, artifactSets);
+      const bonuses = [
+        {
+          set: primarySet.name,
+          text: primarySet.bonus4,
+          pieces: 4,
+          setId: primarySet.id,
+        },
+      ];
+      if (secondarySet) {
+        bonuses.push({
+          set: secondarySet.name,
+          text: secondarySet.bonus2,
+          pieces: 2,
+          setId: secondarySet.id,
+        });
+      }
+      return bonuses;
+    }
+
     return [
-      { set: set.name, text: set.bonus2, pieces: 2 },
-      { set: set.name, text: set.bonus4, pieces: 4 },
+      { set: primarySet.name, text: primarySet.bonus2, pieces: 2, setId: primarySet.id },
+      { set: primarySet.name, text: primarySet.bonus4, pieces: 4, setId: primarySet.id },
     ];
   }
 
@@ -237,10 +306,14 @@ export function getSetBonuses(artifacts, artifactSets = ARTIFACT_SETS) {
   });
   const bonuses = [];
   Object.entries(counts).forEach(([setId, count]) => {
-    const set = artifactSets.find((s) => s.id === setId);
+    const set = findArtifactSetEntry(setId, artifactSets);
     if (!set) return;
-    if (count >= 2) bonuses.push({ set: set.name, text: set.bonus2, pieces: 2 });
-    if (count >= 4) bonuses.push({ set: set.name, text: set.bonus4, pieces: 4 });
+    if (count >= 2) {
+      bonuses.push({ set: set.name, text: set.bonus2, pieces: 2, setId: set.id });
+    }
+    if (count >= 4) {
+      bonuses.push({ set: set.name, text: set.bonus4, pieces: 4, setId: set.id });
+    }
   });
   return bonuses;
 }

@@ -2,7 +2,13 @@
  * Преобразование между форматом UI и строками Supabase.
  */
 import { ARTIFACT_SLOTS, slotsToSimplified, simplifiedToSlots, getDefaultArtifacts, normalizeArtifacts } from '../mockData';
+import {
+  stripWeaponFromArtifactsSummary,
+  mergeWeaponIntoArtifactsSummary,
+  normalizeWeaponType,
+} from '../weapons';
 import { CHARACTER_NAME_RU } from '../characterNamesRu.js';
+import { resolveArtifactSetId } from '../artifacts';
 
 function emptyArtifacts() {
   return simplifiedToSlots(getDefaultArtifacts());
@@ -22,7 +28,7 @@ export function dbCharacterToFrontend(row) {
     nameEn,
     nameRu,
     element: row.element,
-    weapon: row.weapon,
+    weapon: normalizeWeaponType(row.weapon),
     rarity: row.rarity,
     region: row.region,
     iconId: row.icon_id || row.id,
@@ -31,15 +37,35 @@ export function dbCharacterToFrontend(row) {
 
 export function dbArtifactSetToFrontend(row) {
   return {
-    id: row.id,
+    id: resolveArtifactSetId(row.id),
     name: row.name,
     bonus2: row.bonus_2pc,
     bonus4: row.bonus_4pc,
   };
 }
 
+/** Объединяет локальный полный каталог с данными Supabase. */
+export function mergeArtifactSets(dbSets, localSets) {
+  const localMap = new Map(localSets.map((set) => [set.id, set]));
+  const merged = localSets.map((set) => localMap.get(set.id) || set);
+  const seen = new Set(merged.map((set) => set.id));
+
+  for (const dbSet of dbSets) {
+    const id = resolveArtifactSetId(dbSet.id);
+    if (!seen.has(id)) {
+      merged.push({ ...dbSet, id });
+      seen.add(id);
+    }
+  }
+
+  return merged;
+}
+
 export function dbRowToConfig(row, artifacts = []) {
   if (row.artifacts_summary && Object.keys(row.artifacts_summary).length > 0) {
+    const { artifacts: artifactFields, equippedWeaponId } = stripWeaponFromArtifactsSummary(
+      row.artifacts_summary,
+    );
     return {
       id: row.id,
       characterId: row.game_character_id,
@@ -52,7 +78,8 @@ export function dbRowToConfig(row, artifacts = []) {
       critDmg: Number(row.crit_dmg),
       energyRecharge: Number(row.energy_recharge),
       constellation: row.constellation,
-      artifacts: normalizeArtifacts(row.artifacts_summary),
+      artifacts: normalizeArtifacts(artifactFields),
+      equippedWeaponId,
     };
   }
 
@@ -78,6 +105,7 @@ export function dbRowToConfig(row, artifacts = []) {
     energyRecharge: Number(row.energy_recharge),
     constellation: row.constellation,
     artifacts: slotsToSimplified(artifactMap),
+    equippedWeaponId: null,
   };
 }
 
@@ -95,7 +123,10 @@ export function configToDbRow(config, userId) {
     crit_rate: config.critRate,
     crit_dmg: config.critDmg,
     constellation: config.constellation,
-    artifacts_summary: config.artifacts,
+    artifacts_summary: mergeWeaponIntoArtifactsSummary(
+      config.artifacts,
+      config.equippedWeaponId,
+    ),
   };
 }
 

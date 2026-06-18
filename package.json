@@ -10,7 +10,11 @@
     "dev:full": "node scripts/dev.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "generate:weapons": "node scripts/generate-weapons-catalog.mjs",
+    "generate:artifacts": "node scripts/generate-artifacts-catalog.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
@@ -19,6 +23,7 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

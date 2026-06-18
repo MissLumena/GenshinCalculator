@@ -1,0 +1,70 @@
+import fs from 'fs';
+
+const map = {
+  gorou: '\u0413\u043E\u0440\u043E',
+  'yae-miko': '\u042F\u044D \u041C\u0438\u043A\u043E',
+  yoimiya: '\u0401\u0438\u043C\u0438\u044F',
+  'kaedehara-kazuha': '\u041A\u0430\u0434\u0437\u0443\u0445\u0430',
+  'kuki-shinobu': '\u0421\u0438\u043D\u043E\u0431\u0443',
+  'raiden-shogun': '\u0420\u0435\u0439\u0434\u0435\u043D',
+  'kujou-sara': '\u0421\u0430\u0440\u0430',
+  sayu: '\u0421\u0430\u044E',
+  thoma: '\u0422\u043E\u043C\u0430',
+  'shikanoin-heizou': '\u0425\u0435\u0439\u0434\u0437\u043E',
+  kirara: '\u041A\u0438\u0440\u0430\u0440\u0430',
+  'sangonomiya-kokomi': '\u041A\u043E\u043A\u043E\u043C\u0438',
+  tighnari: '\u0422\u0438\u0433\u043D\u0430\u0440\u0438',
+  collei: '\u041A\u043E\u043B\u043B\u0435\u0438',
+  nilou: '\u041D\u0438\u043B\u043E\u0443',
+  candace: '\u041A\u0430\u043D\u0434\u0430\u043A',
+  layla: '\u041B\u0430\u0439\u043B\u0430',
+  nahida: '\u041D\u0430\u0445\u0438\u0434\u0430',
+  wanderer: '\u0411\u0440\u043E\u0434\u044F\u0433\u0430',
+  faruzan: '\u0424\u0430\u0440\u0443\u0437\u0430\u043D',
+  sethos: '\u0421\u0435\u0444\u043E\u0441',
+  lyney: '\u041B\u0438\u043D\u0438',
+  lynette: '\u041B\u0438\u043D\u0435\u0442\u0442',
+  freminet: '\u0424\u0440\u0435\u043C\u0438\u043D\u0435',
+  neuvillette: '\u041D\u0451\u0432\u0438\u043B\u043B\u0435\u0442',
+  furina: '\u0424\u0443\u0440\u0438\u043D\u0430',
+  charlotte: '\u0428\u0430\u0440\u043B\u043E\u0442\u0442\u0430',
+  navia: '\u041D\u0430\u0432\u0438\u044F',
+  chevreuse: '\u0428\u0435\u0432\u0440\u0451\u0437',
+  clorinde: '\u041A\u043B\u043E\u0440\u0438\u043D\u0434\u0430',
+  sigewinne: '\u0421\u0438\u0434\u0436\u0432\u0438\u043D',
+  emilie: '\u042D\u043C\u0438\u043B\u0438\u044F',
+  escoffier: '\u042D\u0441\u043A\u043E\u0444\u044C\u0435',
+  mualani: '\u041C\u0443\u0430\u043B\u0430\u043D\u0438',
+  kachina: '\u041A\u0430\u0447\u0438\u043D\u0430',
+  kinich: '\u041A\u0438\u043D\u0438\u0447',
+  xilonen: '\u0428\u0438\u043B\u043E\u043D\u0435\u043D',
+  chasca: '\u0427\u0430\u0441\u043A\u0430',
+  mavuika: '\u041C\u0430\u0432\u0443\u0438\u043A\u0430',
+  citlali: '\u0421\u0438\u0442\u043B\u0430\u043B\u0438',
+  iansan: '\u0418\u0430\u043D\u0441\u0430\u043D',
+  ineffa: '\u0418\u043D\u0435\u0444\u0444\u0430',
+  lauma: '\u041B\u0430\u0443\u043C\u0430',
+  aino: '\u0410\u0439\u043D\u043E',
+  nefer: '\u041D\u0435\u0444\u0435\u0440',
+  columbina: '\u041A\u043E\u043B\u0443\u043C\u0431\u0438\u043D\u0430',
+  illuga: '\u0418\u043B\u043B\u0443\u0433\u0430',
+  linnea: '\u041B\u0438\u043D\u043D\u0435\u044F',
+  tartaglia: '\u0422\u0430\u0440\u0442\u0430\u043B\u044C\u044F',
+  arlecchino: '\u0410\u0440\u043B\u0435\u043A\u0438\u043D\u043E',
+  xianyun: '\u0421\u044F\u043D\u044C\u042E\u043D\u044C',
+};
+
+const lines = [
+  '/**',
+  ' * Русские имена персонажей (перекрывают nameRu в RAW).',
+  ' */',
+  'export const CHARACTER_NAME_RU = {',
+];
+
+for (const [id, name] of Object.entries(map)) {
+  const key = id.includes('-') ? `'${id}'` : id;
+  lines.push(`  ${key}: '${name}',`);
+}
+
+lines.push('};', '');
+fs.writeFileSync('src/characterNamesRu.js', lines.join('\n'));
