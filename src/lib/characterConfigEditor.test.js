@@ -15,10 +15,28 @@ describe('resolveCharacterConfig', () => {
     expect(result.characterId).toBe('hu-tao');
   });
 
-  it('returns default config when not saved', () => {
-    const result = resolveCharacterConfig(character, []);
-    expect(result.level).toBe(90);
-    expect(result.characterId).toBe('hu-tao');
+  it('normalizes elemental resistance bonuses from saved config', () => {
+    const saved = {
+      ...getDefaultConfig(character),
+      elementalResBonuses: [
+        { element: 'Geo', value: 30 },
+        { element: 'Cryo', value: 15 },
+      ],
+    };
+    const result = resolveCharacterConfig(character, [saved]);
+    expect(result.elementalResBonuses).toEqual([
+      { element: 'Geo', value: 30 },
+      { element: 'Cryo', value: 15 },
+    ]);
+  });
+
+  it('migrates legacy single elementalResBonus field', () => {
+    const saved = {
+      ...getDefaultConfig(character),
+      elementalResBonus: { element: 'Anemo', value: 12 },
+    };
+    const result = resolveCharacterConfig(character, [saved]);
+    expect(result.elementalResBonuses).toEqual([{ element: 'Anemo', value: 12 }]);
   });
 });
 

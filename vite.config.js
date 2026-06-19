@@ -23,13 +23,30 @@ export default defineConfig({
   plugins: [react()],
   envPrefix: ['VITE_', 'SUPABASE_'],
   server: {
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 5173,
-    strictPort: false,
+    strictPort: true,
+    watch: {
+      ignored: [
+        '**/backend/**',
+        '**/test-results/**',
+        '**/*.test.{js,jsx,ts,tsx}',
+      ],
+    },
     proxy: {
       '/api': {
         target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
+      },
+      '/fandom-api': {
+        target: 'https://genshin-impact.fandom.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/fandom-api/, ''),
+      },
+      '/constellation-img': {
+        target: 'https://static.wikia.nocookie.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/constellation-img/, ''),
       },
     },
   },

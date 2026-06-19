@@ -387,7 +387,7 @@ VALUES
     ('ganyu', 'Ganyu', 'Гань Юй', 'Cryo', 'Bow', 5, 'liyue', 'ganyu'),
     ('raiden-shogun', 'Raiden Shogun', 'Raiden', 'Electro', 'Polearm', 5, 'inazuma', 'raiden'),
     ('bennett', 'Bennett', 'Беннет', 'Pyro', 'Sword', 4, 'mondstadt', 'bennett'),
-    ('nicole', 'Nicole', 'Николь', 'Electro', 'Sword', 5, 'celestia', 'nicole')
+    ('nicole', 'Nicole', 'Николь', 'Electro', 'Catalyst', 5, 'celestia', 'nicole')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.artifact_sets (id, name, bonus_2pc, bonus_4pc)

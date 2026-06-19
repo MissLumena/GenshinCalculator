@@ -111,10 +111,14 @@ export async function fetchUserResults(userId) {
 export async function updateMyDisplayName(displayName) {
   const trimmed = typeof displayName === 'string' ? displayName.trim() : '';
   if (!trimmed) {
-    throw new Error('Укажите имя');
+    const err = new Error('Укажите имя');
+    err.field = 'displayName';
+    throw err;
   }
   if (trimmed.length > 100) {
-    throw new Error('Имя не должно быть длиннее 100 символов');
+    const err = new Error('Имя не должно быть длиннее 100 символов');
+    err.field = 'displayName';
+    throw err;
   }
 
   const supabase = getSupabaseClient();
@@ -145,4 +149,26 @@ export async function updateMyDisplayName(displayName) {
   }
 
   return formatDisplayName(data);
+}
+
+/** Оставляет только расчёт текущего аккаунта (или локальный для гостя). */
+export function filterMyResultsUsers(users, { session, isAuthenticated, profileDisplayName }) {
+  const list = Array.isArray(users) ? users : [];
+
+  if (isAuthenticated && session?.user?.id) {
+    const own = list.find((user) => user.userId === session.user.id);
+    if (own) return [own];
+    return [{
+      userId: session.user.id,
+      displayName: formatDisplayName(profileDisplayName),
+    }];
+  }
+
+  return list.filter((user) => user.userId === LOCAL_USER_ID);
+}
+
+/** Для своего расчёта используем команду из приложения, а не RPC Supabase. */
+export function shouldUseLocalResultsSummary(userId, { session, isAuthenticated }) {
+  if (userId === LOCAL_USER_ID) return true;
+  return Boolean(isAuthenticated && session?.user?.id && session.user.id === userId);
 }

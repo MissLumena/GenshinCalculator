@@ -4,11 +4,19 @@
 const DEFAULT_NAME = 'Игрок';
 const LOCAL_USER_ID = 'local';
 
+/** Отображаемое имя суперюзера (единственное с зелёным акцентом). */
+export const SUPERUSER_DISPLAY_NAME = 'Мира';
+
 export { LOCAL_USER_ID };
 
 export function formatDisplayName(name) {
   const trimmed = typeof name === 'string' ? name.trim() : '';
   return trimmed || DEFAULT_NAME;
+}
+
+export function isSuperuserDisplayName(name) {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return trimmed === SUPERUSER_DISPLAY_NAME;
 }
 
 export function validateDisplayName(name) {

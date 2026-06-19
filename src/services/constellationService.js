@@ -5,39 +5,45 @@
  */
 
 import { getJmpSlug, getCharacterConstellationPortraitUrls } from '../characterIcons';
+import { getStaticConstellationShapeUrl } from '../constellationShapeUrls';
+import { getGenshinDbQuery } from '../lib/genshinDbQuery';
+import {
+  getTravelerConstellationCacheKey,
+  getTravelerShapeCharacterId,
+  getTravelerShapeNameEn,
+  isTravelerCharacter,
+  normalizeTravelerElement,
+  TRAVELER_CONSTELLATION_NAME_RU,
+} from '../travelerConstellations';
 
 const GENSIN_DB_API = 'https://genshin-db-api.vercel.app/api';
 const ENKA_UI_BASE = 'https://enka.network/ui';
+const CONSTELLATION_DATA_VERSION = 6;
+
+/** Персонажи, у которых genshin-db отдаёт «???» вместо названия созвездия */
+const CONSTELLATION_OVERRIDES = {
+  columbina: {
+    nameRu: 'Коломбина Гипоселениа',
+    nameEn: 'Columbina Hyposelenia',
+  },
+};
 
 const cache = new Map();
 const imageCache = new Map();
 const fandomShapeCache = new Map();
 
-/** id → запрос для genshin-db-api (если nameEn не подходит) */
-const GENSIN_DB_QUERY_OVERRIDES = {
-  'hu-tao': 'Hu Tao',
-  'raiden-shogun': 'Raiden Shogun',
-  'yun-jin': 'Yun Jin',
-  'lan-yan': 'Lan Yan',
-  'kaedehara-kazuha': 'Kazuha',
-  'kamisato-ayaka': 'Ayaka',
-  'kamisato-ayato': 'Ayato',
-  'kuki-shinobu': 'Shinobu',
-  'sangonomiya-kokomi': 'Kokomi',
-  'kujou-sara': 'Sara',
-  'shikanoin-heizou': 'Heizou',
-  'yae-miko': 'Yae Miko',
-  traveler: 'Traveler',
-  pulonia: 'Prune',
-  yagoda: 'Jahoda',
-};
+function getConstellationCacheKey(character, options = {}) {
+  if (isTravelerCharacter(character) && options.element) {
+    return getTravelerConstellationCacheKey(options.element);
+  }
+  return character?.id;
+}
 
-
-
-function getGenshinDbQuery(character) {
-
-  return GENSIN_DB_QUERY_OVERRIDES[character.id] ?? character.nameEn ?? character.name;
-
+function getJmpSlugForConstellation(character, travelerElement = null) {
+  if (isTravelerCharacter(character)) {
+    return normalizeTravelerElement(travelerElement) === 'Anemo' ? getJmpSlug(character) : null;
+  }
+  return getJmpSlug(character);
 }
 
 
@@ -48,6 +54,18 @@ function enkaAssetUrl(assetName) {
 
   return `${ENKA_UI_BASE}/${assetName}.png`;
 
+}
+
+/** Enka «constellation» из genshin-db — часто Eff_UI_Talent_* (иконка эффекта), не силуэт созвездия. */
+export function isEnkaConstellationShapeAsset(assetName) {
+  if (!assetName || typeof assetName !== 'string') return false;
+  return !assetName.startsWith('Eff_UI_Talent_');
+}
+
+function getEnkaShapeUrl(images) {
+  const assetName = images?.constellation;
+  if (!isEnkaConstellationShapeAsset(assetName)) return null;
+  return enkaAssetUrl(assetName);
 }
 
 
@@ -153,54 +171,147 @@ function normalizeConstellationNameForFandom(name) {
   return String(name || '').trim().replace(/'/g, '');
 }
 
+function isInvalidConstellationName(name, character) {
+  const normalized = normalizeConstellationNameForFandom(name);
+  if (!normalized || normalized === '???') return true;
+
+  const characterNames = new Set(
+    [
+      character?.nameEn,
+      character?.name,
+      character?.nameRu,
+      getGenshinDbQuery(character),
+    ]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase()),
+  );
+
+  return characterNames.has(normalized.toLowerCase());
+}
+
+function resolveConstellationNames(character, charData, charDataEn, constData, constDataEn) {
+  const override = CONSTELLATION_OVERRIDES[character?.id];
+  if (override) {
+    return {
+      nameRu: override.nameRu,
+      nameEn: override.nameEn,
+    };
+  }
+
+  const nameRu = [charData?.constellation, constData?.name]
+    .find((name) => !isInvalidConstellationName(name, character))
+    ?? character.nameRu;
+
+  const nameEn = [
+    charDataEn?.constellation,
+    constDataEn?.name,
+    charData?.constellation,
+    constData?.name,
+  ].find((name) => !isInvalidConstellationName(name, character))
+    ?? character.nameEn;
+
+  return { nameRu, nameEn };
+}
+
+function parseFandomShapeResponse(data) {
+  if (data?.url) return data.url;
+  const page = Object.values(data?.query?.pages || {})[0];
+  return page?.imageinfo?.[0]?.url || null;
+}
+
+function getFandomApiEndpoints(normalized) {
+  const fileName = `${normalized} Shape.png`;
+  const title = `File:${fileName.replace(/ /g, '_')}`;
+  const params = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    prop: 'imageinfo',
+    iiprop: 'url',
+    titles: title,
+  });
+  const query = params.toString();
+  const endpoints = [];
+
+  if (typeof window !== 'undefined') {
+    endpoints.push(`/fandom-api/api.php?${query}`);
+    endpoints.push(`/api/media/fandom-constellation-shape?constellation=${encodeURIComponent(normalized)}`);
+  }
+
+  endpoints.push(`https://genshin-impact.fandom.com/api.php?${query}`);
+  return endpoints;
+}
+
 async function fetchFandomConstellationShapeUrl(constellationNameEn) {
   const normalized = normalizeConstellationNameForFandom(constellationNameEn);
-  if (!normalized) return null;
+  if (!normalized || normalized === '???') return null;
 
   if (fandomShapeCache.has(normalized)) {
     return fandomShapeCache.get(normalized);
   }
 
-  try {
-    const fileName = `${normalized} Shape.png`;
-    const title = `File:${fileName.replace(/ /g, '_')}`;
-    const api = `https://genshin-impact.fandom.com/api.php?action=query&format=json&prop=imageinfo&iiprop=url&titles=${encodeURIComponent(title)}`;
-    const response = await fetch(api);
-    if (!response.ok) return null;
+  const staticUrl = getStaticConstellationShapeUrl(null, normalized);
+  if (staticUrl) {
+    fandomShapeCache.set(normalized, staticUrl);
+    return staticUrl;
+  }
 
-    const data = await response.json();
-    const page = Object.values(data.query?.pages || {})[0];
-    const url = page?.imageinfo?.[0]?.url || null;
-    fandomShapeCache.set(normalized, url);
-    return url;
+  try {
+    for (const api of getFandomApiEndpoints(normalized)) {
+      try {
+        const response = await fetch(api);
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const url = parseFandomShapeResponse(data);
+        if (url) {
+          fandomShapeCache.set(normalized, url);
+          return url;
+        }
+      } catch {
+        // try next endpoint
+      }
+    }
   } catch {
     return null;
   }
+
+  fandomShapeCache.set(normalized, null);
+  return null;
 }
 
-function buildShapeUrlCandidates(images, character, constellationNameEn) {
+function buildShapeUrlCandidates(images, character, constellationNameEn, fandomUrl = null, travelerElement = null) {
   const candidates = [];
-  const slug = getJmpSlug(character);
+  const shapeCharacterId = isTravelerCharacter(character) && travelerElement
+    ? getTravelerShapeCharacterId(travelerElement)
+    : character?.id;
+  const staticUrl = getStaticConstellationShapeUrl(shapeCharacterId, constellationNameEn);
+
+  const slug = getJmpSlugForConstellation(character, travelerElement);
   if (slug) {
     candidates.push(`https://genshin.jmp.blue/characters/${slug}/constellation-shape`);
   }
 
-  const enkaShape = enkaAssetUrl(images?.constellation);
-  if (enkaShape) candidates.push(enkaShape);
+  if (staticUrl) candidates.push(staticUrl);
 
-  const normalized = normalizeConstellationNameForFandom(constellationNameEn);
-  if (normalized) {
-    const fileName = `${normalized} Shape.png`;
-    candidates.push(`https://genshin-impact.fandom.com/wiki/Special:FilePath/${encodeURIComponent(fileName)}`);
+  if (fandomUrl && fandomUrl !== staticUrl) {
+    candidates.push(fandomUrl);
   }
+
+  const enkaShape = getEnkaShapeUrl(images);
+  if (enkaShape) candidates.push(enkaShape);
 
   return [...new Set(candidates.filter(Boolean))];
 }
 
-async function resolveConstellationShape(images, character, constellationNameEn) {
+async function resolveConstellationShape(images, character, constellationNameEn, travelerElement = null) {
   const fandomUrl = await fetchFandomConstellationShapeUrl(constellationNameEn);
-  const candidates = buildShapeUrlCandidates(images, character, constellationNameEn);
-  if (fandomUrl) candidates.push(fandomUrl);
+  const candidates = buildShapeUrlCandidates(
+    images,
+    character,
+    constellationNameEn,
+    fandomUrl,
+    travelerElement,
+  );
 
   const uniqueCandidates = [...new Set(candidates.filter(Boolean))];
   return {
@@ -209,11 +320,12 @@ async function resolveConstellationShape(images, character, constellationNameEn)
   };
 }
 
-async function applyResolvedShape(result, images, character, constellationNameEn) {
+async function applyResolvedShape(result, images, character, constellationNameEn, travelerElement = null) {
   const { shapeUrl, shapeUrlCandidates } = await resolveConstellationShape(
     images,
     character,
     constellationNameEn,
+    travelerElement,
   );
 
   result.shapeUrl = shapeUrl;
@@ -226,38 +338,32 @@ async function applyResolvedShape(result, images, character, constellationNameEn
   return result;
 }
 
-function pickShapeUrl(images, character) {
-  const slug = getJmpSlug(character);
+function pickShapeUrl(images, character, travelerElement = null) {
+  const slug = getJmpSlugForConstellation(character, travelerElement);
   if (slug) {
     return `https://genshin.jmp.blue/characters/${slug}/constellation-shape`;
   }
-  return enkaAssetUrl(images?.constellation);
+  if (isTravelerCharacter(character) && travelerElement) {
+    return getStaticConstellationShapeUrl(
+      getTravelerShapeCharacterId(travelerElement),
+      getTravelerShapeNameEn(travelerElement),
+    );
+  }
+  return getEnkaShapeUrl(images);
 }
 
-function mapGenshinDbConstellations(constData, charData, character) {
+function mapGenshinDbConstellations(constData, charData, character, constellationTitle, travelerElement = null) {
   const images = constData?.images || {};
-  let shapeUrl = pickShapeUrl(images, character);
-
-
-
-  const constellationTitle = charData?.constellation || constData?.name || character.nameRu;
+  let shapeUrl = pickShapeUrl(images, character, travelerElement);
 
   const c0Description = charData?.description
-
     || `${character.nameRu} использует базовый набор талантов без бонусов созвездий.`;
 
-
-
   const items = [{
-
     level: 0,
-
     title: constellationTitle,
-
     description: c0Description,
-
     iconUrl: shapeUrl || enkaAssetUrl(images.c1),
-
   }];
 
 
@@ -287,7 +393,7 @@ function mapGenshinDbConstellations(constData, charData, character) {
 
 
   if (!shapeUrl) {
-    shapeUrl = enkaAssetUrl(images?.constellation) || null;
+    shapeUrl = getEnkaShapeUrl(images) || null;
   }
 
   if (items[0] && shapeUrl) {
@@ -305,8 +411,11 @@ function mapGenshinDbConstellations(constData, charData, character) {
   };
 }
 
-async function fetchFromGenshinDb(character) {
-  const query = getGenshinDbQuery(character);
+async function fetchFromGenshinDb(character, options = {}) {
+  const query = getGenshinDbQuery(character, options);
+  const travelerElement = isTravelerCharacter(character)
+    ? normalizeTravelerElement(options.element)
+    : null;
 
   const [constData, charData, charDataEn, constDataEn] = await Promise.all([
     fetchGenshinDbJson('constellations', query),
@@ -319,14 +428,39 @@ async function fetchFromGenshinDb(character) {
     throw new Error('Constellation data incomplete');
   }
 
-  const constellationNameEn = charDataEn?.constellation
-    || constDataEn?.name
-    || charData?.constellation
-    || constData?.name
-    || character.nameEn;
+  let { nameRu, nameEn } = resolveConstellationNames(
+    character,
+    charData,
+    charDataEn,
+    constData,
+    constDataEn,
+  );
 
-  const result = mapGenshinDbConstellations(constData, charData, character);
-  return applyResolvedShape(result, constData?.images || {}, character, constellationNameEn);
+  if (travelerElement) {
+    nameRu = TRAVELER_CONSTELLATION_NAME_RU;
+    nameEn = getTravelerShapeNameEn(travelerElement);
+  }
+
+  const result = mapGenshinDbConstellations(
+    constData,
+    charData,
+    character,
+    nameRu,
+    travelerElement,
+  );
+  result.element = travelerElement || charDataEn?.element || charData?.element || character.element;
+  const resolved = await applyResolvedShape(
+    result,
+    constData?.images || {},
+    character,
+    nameEn,
+    travelerElement,
+  );
+  resolved.dataVersion = CONSTELLATION_DATA_VERSION;
+  if (travelerElement) {
+    resolved.travelerElement = travelerElement;
+  }
+  return resolved;
 }
 
 
@@ -385,7 +519,10 @@ async function fetchFromJmpBlue(character) {
     fromApi: true,
   };
 
-  return applyResolvedShape(result, {}, character, data.constellation || character.nameEn);
+  const resolved = await applyResolvedShape(result, {}, character, data.constellation || character.nameEn);
+  resolved.element = character.element;
+  resolved.dataVersion = CONSTELLATION_DATA_VERSION;
+  return resolved;
 }
 
 
@@ -435,31 +572,28 @@ export function getConstellationLevelIconUrl(character, level) {
 
 
 
-export async function fetchCharacterConstellationData(character) {
-
+export async function fetchCharacterConstellationData(character, options = {}) {
   if (!character?.id) {
-
     return { constellationName: '', shapeUrl: null, items: [], fromApi: false };
-
   }
 
+  const cacheKey = getConstellationCacheKey(character, options);
 
-
-  if (cache.has(character.id)) {
-
-    return cache.get(character.id);
-
+  if (cache.has(cacheKey)) {
+    const cached = cache.get(cacheKey);
+    if (cached?.dataVersion === CONSTELLATION_DATA_VERSION) {
+      return cached;
+    }
+    cache.delete(cacheKey);
+    imageCache.delete(cacheKey);
   }
-
-
 
   try {
+    const result = await fetchFromGenshinDb(character, options);
 
-    const result = await fetchFromGenshinDb(character);
+    storeImageUrls(cacheKey, result.shapeUrl, result.items);
 
-    storeImageUrls(character.id, result.shapeUrl, result.items);
-
-    cache.set(character.id, result);
+    cache.set(cacheKey, result);
 
     return result;
 
@@ -469,15 +603,15 @@ export async function fetchCharacterConstellationData(character) {
 
       const result = await fetchFromJmpBlue(character);
 
-      storeImageUrls(character.id, result.shapeUrl, result.items);
+      storeImageUrls(cacheKey, result.shapeUrl, result.items);
 
-      cache.set(character.id, result);
+      cache.set(cacheKey, result);
 
       return result;
 
     } catch {
       const unavailable = buildUnavailableConstellations(character);
-      cache.set(character.id, unavailable);
+      cache.set(cacheKey, unavailable);
       return unavailable;
     }
 

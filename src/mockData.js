@@ -14,6 +14,7 @@ import {
   getCharacterNameEn,
   getCharacterNameRu,
 } from './lib/characterName';
+import { calculateCharacterDps } from './lib/dpsCalculator';
 
 export { CHARACTERS };
 export {
@@ -22,6 +23,7 @@ export {
   getCharacterSplashUrls,
   getCharacterSideIconUrl,
   getCharacterConstellationPortraitUrls,
+  getTravelerDuoPortraitSets,
 } from './characterIcons';
 export const findCharacter = findCharacterById;
 
@@ -35,6 +37,94 @@ export const ELEMENT_COLORS = {
   Dendro: 'bg-green-500',
   Physical: 'bg-gray-500',
 };
+
+export const ELEMENTAL_RES_ELEMENTS = ['Pyro', 'Hydro', 'Dendro', 'Anemo', 'Cryo', 'Electro', 'Geo', 'Physical'];
+
+export const ELEMENTAL_RES_BONUS_OPTIONS = [
+  { value: 'Pyro', label: 'Бонус пиро сопротивления' },
+  { value: 'Hydro', label: 'Бонус гидро сопротивления' },
+  { value: 'Dendro', label: 'Бонус дендро сопротивления' },
+  { value: 'Anemo', label: 'Бонус анемо сопротивления' },
+  { value: 'Cryo', label: 'Бонус крио сопротивления' },
+  { value: 'Electro', label: 'Бонус электро сопротивления' },
+  { value: 'Geo', label: 'Бонус гео сопротивления' },
+  { value: 'Physical', label: 'Бонус физ. сопротивления' },
+];
+
+export const MAX_ELEMENTAL_RES_BONUSES = 2;
+
+/** Нормализует один бонус сопротивления стихии. */
+export function normalizeElementalResBonus(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const element = ELEMENTAL_RES_ELEMENTS.includes(raw.element) ? raw.element : null;
+  if (!element) return null;
+  return {
+    element,
+    value: Math.max(0, Number(raw.value) || 0),
+  };
+}
+
+/** Нормализует до двух бонусов сопротивления (массив или legacy-объект). */
+export function normalizeElementalResBonuses(raw) {
+  const items = [];
+
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const normalized = normalizeElementalResBonus(entry);
+      if (normalized && !items.some((item) => item.element === normalized.element)) {
+        items.push(normalized);
+      }
+      if (items.length >= MAX_ELEMENTAL_RES_BONUSES) break;
+    }
+    return items.length ? items : null;
+  }
+
+  const single = normalizeElementalResBonus(raw);
+  return single ? [single] : null;
+}
+
+/** Возвращает два слота бонусов (null для пустых). */
+export function getElementalResBonusSlots(raw) {
+  const list = normalizeElementalResBonuses(raw) ?? [];
+  return [
+    list[0] ?? null,
+    list[1] ?? null,
+  ];
+}
+
+/** Обновляет один слот бонуса сопротивления (0 или 1). */
+export function patchElementalResBonusSlot(raw, slotIndex, patch) {
+  if (slotIndex < 0 || slotIndex >= MAX_ELEMENTAL_RES_BONUSES) {
+    return normalizeElementalResBonuses(raw);
+  }
+
+  const slots = getElementalResBonusSlots(raw);
+  const current = slots[slotIndex];
+
+  if (patch.element === null || patch.element === '') {
+    slots[slotIndex] = null;
+  } else if ('element' in patch) {
+    slots[slotIndex] = normalizeElementalResBonus({
+      element: patch.element,
+      value: patch.value ?? (current?.element === patch.element ? current.value : 0),
+    });
+  } else if ('value' in patch && current?.element) {
+    slots[slotIndex] = normalizeElementalResBonus({
+      element: current.element,
+      value: patch.value,
+    });
+  }
+
+  if (slots[slotIndex]?.element) {
+    const otherIndex = slotIndex === 0 ? 1 : 0;
+    if (slots[otherIndex]?.element === slots[slotIndex].element) {
+      slots[otherIndex] = null;
+    }
+  }
+
+  const compact = slots.filter(Boolean);
+  return compact.length ? compact : null;
+}
 
 /** Сеты артефактов с бонусами 2pc / 4pc (полный каталог ≤ 6.6) */
 export const ARTIFACT_SETS = getLegacyArtifactSetsForBonuses();
@@ -104,9 +194,9 @@ export const CONSTELLATION_DESCRIPTIONS = CONSTELLATION_ITEMS.map(
 
 /** Формулы для тултипов */
 export const FORMULAS = {
-  avgDmg: 'Avg DMG = Base × (1 + CRIT Rate × CRIT DMG)',
-  critDmg: 'Crit DMG = Base × (1 + CRIT DMG%)',
-  teamDps: 'Team DPS = Σ(Character DPS) за время ротации',
+  avgDmg: 'Avg DMG = ATK × множитель навыка × (1 + CRIT Rate × CRIT DMG) × бонусы',
+  critDmg: 'Crit DMG = урон × (1 + CRIT DMG%)',
+  teamDps: 'Team DPS = Σ(урон навыков × частота в ротации) с учётом артефактов, оружия, созвездий и талантов',
   setBonus: 'Set Bonus применяется к соответствующему типу урона',
 };
 
@@ -225,7 +315,7 @@ export function getDefaultConfig(character) {
   return {
     characterId: character.id,
     level: 90,
-    atk: { base: 300, bonus: 100 },
+    atk: { base: 400, bonus: 0 },
     hp: 18000,
     def: 800,
     em: 100,
@@ -235,30 +325,29 @@ export function getDefaultConfig(character) {
     constellation: 0,
     artifacts: getDefaultArtifacts(),
     equippedWeaponId: null,
+    elementalResBonuses: null,
+    talentLevels: { auto: 10, skill: 10, burst: 10 },
   };
 }
 
-/** Mock-расчёт DPS для демонстрации результатов */
-export function calculateMockDps(config, character) {
-  const atk = config.atk.base + config.atk.bonus;
-  const critMult = 1 + (config.critRate / 100) * (config.critDmg / 100);
-  const constBonus = 1 + config.constellation * 0.05;
-  const base = atk * critMult * constBonus;
+/** Суммарный ATK персонажа (base + bonus). */
+export function getConfigTotalAtk(atk) {
+  return Math.max(0, Number(atk?.base) || 0) + Math.max(0, Number(atk?.bonus) || 0);
+}
 
-  return {
-    characterId: character.id,
-    name: formatCharacterChartLabel(character),
-    nameRu: getCharacterNameRu(character),
-    nameEn: getCharacterNameEn(character),
+/** Записывает ATK в одно поле (bonus обнуляется). */
+export function applyConfigTotalAtk(total) {
+  const value = Math.max(0, Number(total) || 0);
+  return { base: value, bonus: 0 };
+}
+
+/** Расчёт DPS с учётом статов, артефактов, оружия, созвездий и уровней талантов */
+export function calculateMockDps(config, character, options = {}) {
+  return calculateCharacterDps(config, character, {
+    artifactSets: options.artifactSets,
+    formatName: formatCharacterChartLabel,
     iconUrl: getCharacterIconUrl(character),
-    constellation: config.constellation,
-    skills: {
-      auto: { normal: Math.round(base * 0.8), crit: Math.round(base * 0.8 * (1 + config.critDmg / 100)), affectedByConst: config.constellation >= 6 },
-      skill: { normal: Math.round(base * 1.5), crit: Math.round(base * 1.5 * (1 + config.critDmg / 100)), affectedByConst: config.constellation >= 2 },
-      burst: { normal: Math.round(base * 3.2), crit: Math.round(base * 3.2 * (1 + config.critDmg / 100)), affectedByConst: config.constellation >= 4 },
-    },
-    totalDps: Math.round(base * 2.5),
-  };
+  });
 }
 
 function findArtifactSetEntry(setId, artifactSets) {

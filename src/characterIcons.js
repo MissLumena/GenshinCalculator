@@ -52,6 +52,7 @@ export const ENKA_ICON_NAMES = {
 };
 
 function defaultEnkaName(id) {
+  if (!id || typeof id !== 'string') return '';
   return id
     .split('-')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -59,16 +60,18 @@ function defaultEnkaName(id) {
 }
 
 export function getJmpSlug(character) {
+  if (!character) return null;
   if (character.iconId && JMP_SLUGS.has(character.iconId)) {
     return character.iconId;
   }
   const override = JMP_SLUG_OVERRIDES[character.id];
   if (override) return override;
-  if (JMP_SLUGS.has(character.id)) return character.id;
+  if (character.id && JMP_SLUGS.has(character.id)) return character.id;
   return null;
 }
 
 function getEnkaName(character) {
+  if (!character?.id) return '';
   return ENKA_ICON_NAMES[character.id] || defaultEnkaName(character.id);
 }
 
@@ -83,7 +86,9 @@ export function getCharacterIconUrls(character) {
   }
 
   const enkaName = getEnkaName(character);
-  urls.push(`https://enka.network/ui/UI_AvatarIcon_${enkaName}.png`);
+  if (enkaName) {
+    urls.push(`https://enka.network/ui/UI_AvatarIcon_${enkaName}.png`);
+  }
 
   return urls;
 }
@@ -94,6 +99,7 @@ export const ENKA_SPLASH_NAMES = {
 };
 
 function getEnkaSplashName(character) {
+  if (!character?.id) return '';
   return ENKA_SPLASH_NAMES[character.id] || ENKA_ICON_NAMES[character.id] || defaultEnkaName(character.id);
 }
 
@@ -102,6 +108,7 @@ export function getCharacterSplashUrls(character) {
   if (!character) return [];
 
   const splashName = getEnkaSplashName(character);
+  if (!splashName) return [];
   return [`https://enka.network/ui/UI_Gacha_AvatarImg_${splashName}.png`];
 }
 
@@ -114,7 +121,22 @@ export function getCharacterIconUrl(character) {
 export function getCharacterSideIconUrl(character) {
   if (!character) return '';
   const enkaName = getEnkaName(character);
+  if (!enkaName) return '';
   return `https://enka.network/ui/UI_AvatarIcon_Side_${enkaName}.png`;
+}
+
+/** Портреты Эттера и Люмин для панели созвездий Путешественника. */
+export function getTravelerDuoPortraitSets() {
+  return {
+    aether: [
+      'https://enka.network/ui/UI_Gacha_AvatarImg_PlayerBoy.png',
+      'https://enka.network/ui/UI_AvatarIcon_Side_PlayerBoy.png',
+    ],
+    lumine: [
+      'https://enka.network/ui/UI_Gacha_AvatarImg_PlayerGirl.png',
+      'https://enka.network/ui/UI_AvatarIcon_Side_PlayerGirl.png',
+    ],
+  };
 }
 
 /**
@@ -123,6 +145,7 @@ export function getCharacterSideIconUrl(character) {
  */
 export function getCharacterConstellationPortraitUrls(character) {
   if (!character) return [];
+  if (character.id === 'traveler') return [];
 
   const urls = [
     ...getCharacterSplashUrls(character),

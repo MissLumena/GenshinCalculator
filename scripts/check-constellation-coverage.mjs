@@ -17,6 +17,9 @@ const GENSIN_DB_QUERY_OVERRIDES = {
   traveler: 'Traveler',
   pulonia: 'Prune',
   yagoda: 'Jahoda',
+  loen: 'Lohen',
+  skirk: 'Skirk',
+  columbina: 'Columbina',
 };
 
 async function ok(url) {
@@ -60,8 +63,9 @@ for (const character of CHARACTERS) {
 
   const slug = getJmpSlug(character);
   const jmp = slug ? `https://genshin.jmp.blue/characters/${slug}/constellation-shape` : null;
-  const eff = constData?.images?.constellation
-    ? `https://enka.network/ui/${constData.images.constellation}.png`
+  const eff = constData?.images?.constellation;
+  const enka = eff && !eff.startsWith('Eff_UI_Talent_')
+    ? `https://enka.network/ui/${eff}.png`
     : null;
   const fandom = await fandomShape(charDataEn?.constellation || constData?.name);
 

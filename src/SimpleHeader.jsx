@@ -7,10 +7,13 @@ const NAV_ITEMS = [
   { to: '/', label: 'Главная' },
   { to: '/characters', label: 'Персонажи' },
   { to: '/team', label: 'Команда' },
-  { to: '/results', label: 'Результаты' },
+  { to: '/results#mine', label: 'Результаты' },
 ];
 
 function isNavActive(pathname, to) {
+  if (to.startsWith('/results')) {
+    return pathname === '/results' || pathname.startsWith('/results/');
+  }
   return pathname === to || (to !== '/' && pathname.startsWith(to));
 }
 

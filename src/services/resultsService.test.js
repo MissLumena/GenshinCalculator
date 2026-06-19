@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { mapPublicResultsPayload } from '../services/resultsService';
+import {
+  filterMyResultsUsers,
+  mapPublicResultsPayload,
+  shouldUseLocalResultsSummary,
+  updateMyDisplayName,
+} from '../services/resultsService';
+import { LOCAL_USER_ID } from '../lib/displayName';
 
 describe('mapPublicResultsPayload', () => {
   it('maps team and configs from rpc payload', () => {
@@ -34,5 +40,72 @@ describe('mapPublicResultsPayload', () => {
     expect(result.team).toEqual([]);
     expect(result.configs).toEqual([]);
     expect(result.displayName).toBe('Игрок');
+  });
+});
+
+describe('updateMyDisplayName', () => {
+  it('returns field hint for empty name', async () => {
+    await expect(updateMyDisplayName('   ')).rejects.toMatchObject({
+      message: 'Укажите имя',
+      field: 'displayName',
+    });
+  });
+});
+
+describe('filterMyResultsUsers', () => {
+  const users = [
+    { userId: LOCAL_USER_ID, displayName: 'Вы (локально)' },
+    { userId: 'user-a', displayName: 'Алиса' },
+    { userId: 'user-b', displayName: 'Боб' },
+  ];
+
+  it('returns only local entry for guest', () => {
+    const result = filterMyResultsUsers(users, {
+      session: null,
+      isAuthenticated: false,
+      profileDisplayName: null,
+    });
+    expect(result).toEqual([{ userId: LOCAL_USER_ID, displayName: 'Вы (локально)' }]);
+  });
+
+  it('returns only current user when authenticated', () => {
+    const result = filterMyResultsUsers(users, {
+      session: { user: { id: 'user-b' } },
+      isAuthenticated: true,
+      profileDisplayName: 'Боб',
+    });
+    expect(result).toEqual([{ userId: 'user-b', displayName: 'Боб' }]);
+  });
+
+  it('creates placeholder entry for authenticated user absent from list', () => {
+    const result = filterMyResultsUsers(users, {
+      session: { user: { id: 'user-new' } },
+      isAuthenticated: true,
+      profileDisplayName: 'Новый игрок',
+    });
+    expect(result).toEqual([{ userId: 'user-new', displayName: 'Новый игрок' }]);
+  });
+});
+
+describe('shouldUseLocalResultsSummary', () => {
+  it('uses local summary for guest local id', () => {
+    expect(shouldUseLocalResultsSummary(LOCAL_USER_ID, {
+      session: null,
+      isAuthenticated: false,
+    })).toBe(true);
+  });
+
+  it('uses local summary for authenticated own user id', () => {
+    expect(shouldUseLocalResultsSummary('user-1', {
+      session: { user: { id: 'user-1' } },
+      isAuthenticated: true,
+    })).toBe(true);
+  });
+
+  it('uses remote summary for other users', () => {
+    expect(shouldUseLocalResultsSummary('user-2', {
+      session: { user: { id: 'user-1' } },
+      isAuthenticated: true,
+    })).toBe(false);
   });
 });

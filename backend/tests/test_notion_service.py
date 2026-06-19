@@ -58,3 +58,37 @@ def test_map_notion_page_reads_title_properties() -> None:
     assert item.user_label == 'Игрок'
     assert item.total_dps == 15000
     assert item.members == ['Ху Тао C1 | АТК 2400']
+
+
+def test_map_notion_page_reads_character_ids_from_levels_label() -> None:
+    page = {
+        'id': 'page-2',
+        'url': 'https://www.notion.so/page-2',
+        'properties': {
+            'Пользователь': {
+                'type': 'rich_text',
+                'rich_text': [{'plain_text': 'Игрок'}],
+            },
+            'user_id': {
+                'type': 'rich_text',
+                'rich_text': [{'plain_text': 'user-1'}],
+            },
+            'Команда': {
+                'type': 'rich_text',
+                'rich_text': [{'plain_text': 'Ху Тао, Венти'}],
+            },
+            'Сумарный DPS': {
+                'type': 'number',
+                'number': 15000,
+            },
+            'Уровни': {
+                'type': 'rich_text',
+                'rich_text': [{'plain_text': '90, 90|hu-tao,venti'}],
+            },
+        },
+    }
+
+    item = map_notion_page(page)
+    assert item.levels_label == '90, 90'
+    assert item.character_ids == ['hu-tao', 'venti']
+    assert item.notion_url == 'https://www.notion.so/page-2'

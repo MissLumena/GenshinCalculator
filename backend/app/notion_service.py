@@ -6,7 +6,9 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any
 
+from app.config import Settings
 from app.notion_client import NotionApiError, NotionClient
+from app.notion_permissions import can_delete_notion_result
 from app.schemas import NotionResultItem, NotionSaveResultRequest
 
 logger = logging.getLogger('genshin_api')
@@ -71,6 +73,15 @@ def _read_date(prop: dict[str, Any] | None) -> str | None:
     return date_obj.get('start')
 
 
+def _parse_levels_label(raw: str) -> tuple[str, list[str]]:
+    text = (raw or '').strip()
+    if '|' not in text:
+        return text, []
+    levels_part, ids_part = text.split('|', 1)
+    character_ids = [item.strip() for item in ids_part.split(',') if item.strip()]
+    return levels_part.strip(), character_ids[:4]
+
+
 def build_notion_properties(
     payload: NotionSaveResultRequest,
     *,
@@ -100,6 +111,7 @@ def build_notion_properties(
 def map_notion_page(page: dict[str, Any]) -> NotionResultItem:
     props = page.get('properties') or {}
     members = [_read_text_prop(props.get(name)) for name in PROP_CHARS]
+    levels_label, character_ids = _parse_levels_label(_read_text_prop(props.get(PROP_LEVELS)))
 
     return NotionResultItem(
         page_id=page.get('id', ''),
@@ -108,8 +120,10 @@ def map_notion_page(page: dict[str, Any]) -> NotionResultItem:
         team_label=_read_text_prop(props.get(PROP_TEAM)),
         total_dps=_read_number(props.get(PROP_TOTAL_DPS)),
         calculated_at=_read_date(props.get(PROP_DATE)),
-        levels_label=_read_text_prop(props.get(PROP_LEVELS)),
+        levels_label=levels_label,
         members=[member for member in members if member],
+        character_ids=character_ids,
+        notion_url=page.get('url'),
     )
 
 
@@ -142,15 +156,19 @@ class NotionService:
         items.sort(key=lambda item: item.calculated_at or '', reverse=True)
         return items
 
-    def delete_result(self, page_id: str, *, requester_id: str, requester_role: str) -> None:
+    def delete_result(
+        self,
+        page_id: str,
+        *,
+        requester_email: str | None,
+        settings: Settings,
+    ) -> None:
+        if not can_delete_notion_result(requester_email, settings):
+            raise NotionApiError(403, 'Недостаточно прав для удаления')
+
         pages = self._client.query_database()
         target = next((page for page in pages if page.get('id') == page_id), None)
         if not target:
             raise NotionApiError(404, 'Запись не найдена')
-
-        owner_id = _read_text_prop((target.get('properties') or {}).get(PROP_USER_ID))
-        is_privileged = requester_role in {'admin', 'superuser'}
-        if not is_privileged and owner_id != requester_id:
-            raise NotionApiError(403, 'Недостаточно прав для удаления')
 
         self._client.archive_page(page_id)

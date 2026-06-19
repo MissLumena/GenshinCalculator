@@ -9,7 +9,12 @@ import {
   dbRowToConfig,
 } from './mappers';
 import { fetchTeamComposition } from './teamService';
-import { formatDisplayName } from '../lib/displayName';
+import { formatDisplayName, validateDisplayName } from '../lib/displayName';
+import {
+  assertOAuthAllowedForCountry,
+  isSupportedOAuthProvider,
+  OAUTH_PROVIDER_MAILRU,
+} from '../lib/oauthPolicy';
 import { resolveArtifactSetId, DEFAULT_ARTIFACT_SET_ID } from '../artifacts';
 
 const DEFAULT_TEAM_NAME = 'Основная команда';
@@ -301,12 +306,58 @@ export async function syncTeam(userId, teamId, team, savedConfigs) {
   return activeTeamId;
 }
 
+const AUTH_RATE_WINDOW_MS = 60_000;
+const AUTH_RATE_MAX_ATTEMPTS = 10;
+const authRateStore = new Map();
+
+function assertAuthRateLimit(action, email) {
+  const key = `${action}:${email.toLowerCase()}`;
+  const now = Date.now();
+  const windowStart = now - AUTH_RATE_WINDOW_MS;
+  const hits = (authRateStore.get(key) || []).filter((ts) => ts > windowStart);
+
+  if (hits.length >= AUTH_RATE_MAX_ATTEMPTS) {
+    const err = new Error('Слишком много попыток. Подождите минуту.');
+    err.field = 'form';
+    throw err;
+  }
+
+  hits.push(now);
+  authRateStore.set(key, hits);
+}
+
+export function resetAuthRateLimitForTests() {
+  authRateStore.clear();
+}
+
 export async function signIn(email, password) {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase не настроен');
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw wrapSupabaseError(error, 'Ошибка входа');
+  const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+  if (!normalizedEmail) {
+    const err = new Error('Укажите email');
+    err.field = 'email';
+    throw err;
+  }
+  if (!password) {
+    const err = new Error('Укажите пароль');
+    err.field = 'password';
+    throw err;
+  }
+
+  assertAuthRateLimit('signIn', normalizedEmail);
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password,
+  });
+  if (error) {
+    const authError = new Error(`Ошибка входа: ${error.message || 'Неизвестная ошибка Supabase'}`);
+    const lower = (error.message || '').toLowerCase();
+    authError.field = lower.includes('password') ? 'password' : 'email';
+    throw authError;
+  }
   return data.session;
 }
 
@@ -314,22 +365,47 @@ export async function signUp(email, password, displayName) {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase не настроен');
 
-  const trimmedName = typeof displayName === 'string' ? displayName.trim() : '';
-  if (!trimmedName) {
-    throw new Error('Укажите имя');
+  const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+  if (!normalizedEmail) {
+    const err = new Error('Укажите email');
+    err.field = 'email';
+    throw err;
   }
-  if (trimmedName.length > 100) {
-    throw new Error('Имя не должно быть длиннее 100 символов');
+  if (!password || String(password).length < 6) {
+    const err = new Error('Пароль должен быть не короче 6 символов');
+    err.field = 'password';
+    throw err;
   }
 
+  const nameError = validateDisplayName(displayName);
+  if (nameError) {
+    const err = new Error(nameError);
+    err.field = 'displayName';
+    throw err;
+  }
+  const trimmedName = typeof displayName === 'string' ? displayName.trim() : '';
+
+  assertAuthRateLimit('signUp', normalizedEmail);
+
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: normalizedEmail,
     password,
     options: {
       data: { display_name: trimmedName },
     },
   });
-  if (error) throw wrapSupabaseError(error, 'Ошибка регистрации');
+  if (error) {
+    const authError = new Error(`Ошибка регистрации: ${error.message || 'Неизвестная ошибка Supabase'}`);
+    const lower = (error.message || '').toLowerCase();
+    if (lower.includes('password')) {
+      authError.field = 'password';
+    } else if (lower.includes('email')) {
+      authError.field = 'email';
+    } else {
+      authError.field = 'form';
+    }
+    throw authError;
+  }
 
   if (data.user) {
     const { error: profileError } = await supabase
@@ -343,6 +419,38 @@ export async function signUp(email, password, displayName) {
   }
 
   return data.session;
+}
+
+export async function signInWithOAuth(provider, countryCode) {
+  if (!isSupportedOAuthProvider(provider)) {
+    throw new Error('Неподдерживаемый способ входа');
+  }
+
+  assertOAuthAllowedForCountry(provider, countryCode);
+
+  if (provider === OAUTH_PROVIDER_MAILRU) {
+    window.location.assign('/api/auth/mailru/start');
+    return;
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase не настроен');
+
+  const redirectTo = `${window.location.origin}/auth/callback`;
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      queryParams: provider === 'google'
+        ? { prompt: 'select_account' }
+        : undefined,
+    },
+  });
+
+  if (error) throw wrapSupabaseError(error, 'Ошибка OAuth');
+  if (!data?.url) throw new Error('Не удалось начать OAuth-авторизацию');
+
+  window.location.assign(data.url);
 }
 
 export async function signOut() {

@@ -1,4 +1,5 @@
-import { getDefaultConfig, normalizeArtifacts } from '../mockData';
+import { getDefaultConfig, normalizeArtifacts, normalizeElementalResBonuses } from '../mockData';
+import { normalizeTalentLevels } from './talentLevelLimits';
 import { findWeaponById } from '../weapons';
 
 /** Собирает конфиг персонажа из сохранённых данных или дефолта. */
@@ -12,6 +13,15 @@ export function resolveCharacterConfig(character, savedConfigs) {
     ...base,
     artifacts: normalizeArtifacts(base.artifacts),
     equippedWeaponId: normalizeEquippedWeaponId(base.equippedWeaponId),
+    elementalResBonuses: normalizeElementalResBonuses(
+      base.elementalResBonuses ?? base.elementalResBonus,
+    ),
+    talentLevels: base.talentLevels && typeof base.talentLevels === 'object'
+      ? normalizeTalentLevels(
+        { talentLevels: base.talentLevels, constellation: base.constellation ?? 0 },
+        character,
+      )
+      : base.talentLevels ?? null,
   };
 }
 

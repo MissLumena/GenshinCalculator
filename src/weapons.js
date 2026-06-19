@@ -4,6 +4,7 @@
  */
 import { WEAPONS, WEAPON_CATALOG_COUNTS, WEAPON_CATALOG_SOURCE } from './data/weaponsCatalog.js';
 import { WEAPON_CATALOG_META } from './data/weaponCatalogMeta.js';
+import { CHARACTER_SIGNATURE_WEAPONS } from './data/characterSignatureWeapons.js';
 
 export { WEAPONS, WEAPON_CATALOG_COUNTS };
 
@@ -154,26 +155,136 @@ export function getWeaponLabel(weaponId, { preferRu = true } = {}) {
   return weapon.nameEn;
 }
 
-/** Ключ оружия в artifacts_summary JSONB (Supabase). */
+import { normalizeElementalResBonuses } from './mockData';
+
+/** Ключи доп. полей конфига в artifacts_summary JSONB (Supabase). */
 export const EQUIPPED_WEAPON_SUMMARY_KEY = '_equippedWeaponId';
+export const ELEMENTAL_RES_BONUSES_KEY = '_elementalResBonuses';
+/** @deprecated legacy single bonus keys */
+export const ELEMENTAL_RES_BONUS_ELEMENT_KEY = '_elementalResBonusElement';
+export const ELEMENTAL_RES_BONUS_VALUE_KEY = '_elementalResBonusValue';
+export const TALENT_LEVELS_SUMMARY_KEY = '_talentLevels';
+
+function normalizeTalentLevelsSummary(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const result = {};
+  for (const key of ['auto', 'skill', 'burst']) {
+    if (raw[key] == null || raw[key] === '') continue;
+    const parsed = Number(raw[key]);
+    if (Number.isFinite(parsed)) {
+      result[key] = Math.min(13, Math.max(1, parsed));
+    }
+  }
+  return Object.keys(result).length ? result : null;
+}
 
 export function stripWeaponFromArtifactsSummary(summary) {
   if (!summary || typeof summary !== 'object') {
-    return { artifacts: summary, equippedWeaponId: null };
+    return {
+      artifacts: summary,
+      equippedWeaponId: null,
+      elementalResBonuses: null,
+      talentLevels: null,
+    };
   }
-  const { [EQUIPPED_WEAPON_SUMMARY_KEY]: equippedWeaponId, ...artifacts } = summary;
+  const {
+    [EQUIPPED_WEAPON_SUMMARY_KEY]: equippedWeaponId,
+    [ELEMENTAL_RES_BONUSES_KEY]: resBonusesRaw,
+    [ELEMENTAL_RES_BONUS_ELEMENT_KEY]: legacyResElement,
+    [ELEMENTAL_RES_BONUS_VALUE_KEY]: legacyResValue,
+    [TALENT_LEVELS_SUMMARY_KEY]: talentLevelsRaw,
+    ...artifacts
+  } = summary;
+
+  const elementalResBonuses = normalizeElementalResBonuses(
+    resBonusesRaw ?? (legacyResElement
+      ? { element: legacyResElement, value: legacyResValue }
+      : null),
+  );
+
   return {
     artifacts,
     equippedWeaponId: equippedWeaponId || null,
+    elementalResBonuses,
+    talentLevels: normalizeTalentLevelsSummary(talentLevelsRaw),
   };
 }
 
-export function mergeWeaponIntoArtifactsSummary(artifacts, equippedWeaponId) {
+export function mergeConfigExtrasIntoArtifactsSummary(artifacts, {
+  equippedWeaponId,
+  elementalResBonuses,
+  talentLevels,
+} = {}) {
   const base = { ...(artifacts || {}) };
   if (equippedWeaponId) {
     base[EQUIPPED_WEAPON_SUMMARY_KEY] = equippedWeaponId;
   } else {
     delete base[EQUIPPED_WEAPON_SUMMARY_KEY];
   }
+
+  const normalizedResBonuses = normalizeElementalResBonuses(elementalResBonuses);
+  if (normalizedResBonuses) {
+    base[ELEMENTAL_RES_BONUSES_KEY] = normalizedResBonuses;
+  } else {
+    delete base[ELEMENTAL_RES_BONUSES_KEY];
+  }
+  delete base[ELEMENTAL_RES_BONUS_ELEMENT_KEY];
+  delete base[ELEMENTAL_RES_BONUS_VALUE_KEY];
+
+  const normalizedTalentLevels = normalizeTalentLevelsSummary(talentLevels);
+  if (normalizedTalentLevels) {
+    base[TALENT_LEVELS_SUMMARY_KEY] = normalizedTalentLevels;
+  } else {
+    delete base[TALENT_LEVELS_SUMMARY_KEY];
+  }
+
   return base;
+}
+
+export function mergeWeaponIntoArtifactsSummary(artifacts, equippedWeaponId, extras = undefined) {
+  if (extras !== undefined && extras !== null && typeof extras === 'object' && !Array.isArray(extras)) {
+    return mergeConfigExtrasIntoArtifactsSummary(artifacts, {
+      equippedWeaponId,
+      ...extras,
+    });
+  }
+
+  return mergeConfigExtrasIntoArtifactsSummary(artifacts, {
+    equippedWeaponId,
+    elementalResBonuses: extras === undefined ? null : extras,
+  });
+}
+
+/** Id сигнатурного оружия для персонажа (null, если нет или тип не совпадает). */
+export function getSignatureWeaponId(characterId, characterWeaponType) {
+  if (!characterId) return null;
+  const weaponId = CHARACTER_SIGNATURE_WEAPONS[characterId];
+  if (!weaponId) return null;
+
+  const weapon = findWeaponById(weaponId);
+  if (!weapon) return null;
+
+  const normalizedType = normalizeWeaponType(characterWeaponType);
+  if (normalizedType && weapon.type !== normalizedType) {
+    return null;
+  }
+
+  return weaponId;
+}
+
+/** Ставит сигнатуру первой в списке, сохраняя порядок остальных. */
+export function sortWeaponsWithSignatureFirst(weapons, signatureWeaponId) {
+  if (!signatureWeaponId || !Array.isArray(weapons) || weapons.length <= 1) {
+    return weapons;
+  }
+
+  const sigIndex = weapons.findIndex((weapon) => weapon.id === signatureWeaponId);
+  if (sigIndex <= 0) {
+    return weapons;
+  }
+
+  const sorted = [...weapons];
+  const [signatureWeapon] = sorted.splice(sigIndex, 1);
+  sorted.unshift(signatureWeapon);
+  return sorted;
 }

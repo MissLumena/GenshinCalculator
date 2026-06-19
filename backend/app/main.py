@@ -10,7 +10,19 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.notion_client import NotionApiError, NotionClient
-from app.routers import auth, builds, calculate, catalog, characters, notion, teams
+from app.routers import (
+    auth,
+    auth_geo,
+    auth_mailru,
+    builds,
+    calculate,
+    catalog,
+    characters,
+    media,
+    notion,
+    session,
+    teams,
+)
 
 logger = logging.getLogger('genshin_api')
 settings = get_settings()
@@ -43,18 +55,22 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allow_headers=['Authorization', 'Content-Type', 'Accept'],
 )
 
 api = settings.api_prefix
 app.include_router(auth.router, prefix=api)
+app.include_router(auth_geo.router, prefix=api)
+app.include_router(auth_mailru.router, prefix=api)
 app.include_router(catalog.router, prefix=api)
 app.include_router(characters.router, prefix=api)
 app.include_router(teams.router, prefix=api)
 app.include_router(builds.router, prefix=api)
 app.include_router(calculate.router, prefix=api)
 app.include_router(notion.router, prefix=api)
+app.include_router(session.router, prefix=api)
+app.include_router(media.router, prefix=api)
 
 if static_dir.is_dir():
     app.mount('/tester', StaticFiles(directory=static_dir, html=True), name='tester')

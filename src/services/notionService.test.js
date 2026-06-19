@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildNotionSavePayload } from './notionService';
+import { buildNotionSavePayload, validateNotionSavePayload } from './notionService';
 
 describe('notionService', () => {
   it('buildNotionSavePayload formats team summary', () => {
@@ -24,8 +24,9 @@ describe('notionService', () => {
 
     expect(payload.team_label).toBe('Венти, Ху Тао');
     expect(payload.total_dps).toBe(12000);
+    expect(payload.members[0]).toMatch(/^venti\|/);
     expect(payload.members[0]).toContain('Венти C0');
-    expect(payload.levels_label).toBe('90, 80');
+    expect(payload.levels_label).toBe('90, 80|venti,hu-tao');
     expect(payload.display_name).toBe('Tester');
   });
 
@@ -52,7 +53,121 @@ describe('notionService', () => {
     vi.unstubAllGlobals();
   });
 
-  it('fetchNotionResults maps backend 500 to helpful message', async () => {
+  it('validateNotionSavePayload rejects zero dps', () => {
+    try {
+      validateNotionSavePayload({
+        team_label: 'Вентi',
+        total_dps: 0,
+        members: [],
+      });
+      throw new Error('expected validation error');
+    } catch (error) {
+      expect(error.message).toMatch(/DPS/i);
+      expect(error.field).toBe('total_dps');
+    }
+  });
+
+  it('validateNotionSavePayload rejects empty team with field', () => {
+    try {
+      validateNotionSavePayload({
+        team_label: '   ',
+        total_dps: 1000,
+        members: [],
+      });
+      throw new Error('expected validation error');
+    } catch (error) {
+      expect(error.field).toBe('team_label');
+    }
+  });
+
+  it('saveResultToNotion maps validation errors to readable text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => 'application/json' },
+      json: async () => ({
+        detail: [{
+          loc: ['body', 'total_dps'],
+          msg: 'Input should be greater than 0',
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { saveResultToNotion } = await import('./notionService');
+    await expect(saveResultToNotion({ team_label: 'A', total_dps: 0, members: [] }, 'token'))
+      .rejects.toThrow(/Суммарный DPS/i);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('saveResultToNotion maps 401 to session message', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ detail: 'Invalid or expired token' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { saveResultToNotion } = await import('./notionService');
+    await expect(saveResultToNotion({ team_label: 'A', total_dps: 1000, members: [] }, 'token'))
+      .rejects.toThrow(/Сессия истекла/i);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetchNotionResults requires access token', async () => {
+    const { fetchNotionResults } = await import('./notionService');
+    await expect(fetchNotionResults(null)).rejects.toThrow(/Войдите в аккаунт/i);
+  });
+
+  it('fetchNotionResults sends bearer token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ items: [{ page_id: 'p1' }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchNotionResults } = await import('./notionService');
+    const data = await fetchNotionResults('token-abc');
+    expect(data.items).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/notion/results',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-abc',
+        }),
+      }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetchNotionResults retries transient 502 responses', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        headers: { get: () => 'text/plain' },
+        text: async () => 'Bad Gateway',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ items: [] }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchNotionResults } = await import('./notionService');
+    await expect(fetchNotionResults('token-abc')).resolves.toEqual({ items: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetchNotionResults surfaces backend 500 as server error', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
@@ -62,7 +177,7 @@ describe('notionService', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { fetchNotionResults } = await import('./notionService');
-    await expect(fetchNotionResults()).rejects.toThrow(/dev:full|dev:api/i);
+    await expect(fetchNotionResults('token-abc')).rejects.toThrow(/Internal Server Error|HTTP 500/i);
 
     vi.unstubAllGlobals();
   });

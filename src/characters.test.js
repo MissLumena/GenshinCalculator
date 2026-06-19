@@ -3,11 +3,13 @@ import { CHARACTERS, CHARACTER_REGIONS } from './characters';
 import { getCharacterIconUrls, getCharacterIconUrl } from './characterIcons';
 
 describe('characters', () => {
-  it('contains Nicole with Russian name', () => {
+  it('contains Nicole as Electro catalyst with Russian name', () => {
     const nicole = CHARACTERS.find((c) => c.id === 'nicole');
     expect(nicole).toBeDefined();
     expect(nicole.nameRu).toBe('Николь');
     expect(nicole.region).toBe('celestia');
+    expect(nicole.element).toBe('Electro');
+    expect(nicole.weapon).toBe('Catalyst');
   });
 
   it('contains all regions from the V2 spec', () => {
@@ -29,6 +31,16 @@ describe('characters', () => {
     expect(flins).toBeDefined();
     expect(flins.nameRu).toBe('Флинс');
     expect(flins.element).toBe('Electro');
+  });
+
+  it('contains Illuga (Иллуги) as Geo polearm', () => {
+    const illuga = CHARACTERS.find((c) => c.id === 'illuga');
+    expect(illuga).toBeDefined();
+    expect(illuga.nameRu).toBe('Иллуги');
+    expect(illuga.nameEn).toBe('Illuga');
+    expect(illuga.element).toBe('Geo');
+    expect(illuga.weapon).toBe('Polearm');
+    expect(illuga.rarity).toBe(4);
   });
 
   it('contains Wriothesley (Ризли) in Fontaine', () => {

@@ -147,7 +147,10 @@ test.describe('Пользовательские сценарии', () => {
       await page.goto('/results');
       await expect(page.getByRole('heading', { name: 'Результаты', level: 1 })).toBeVisible();
 
-      const playerLinks = page.locator('ul.glass-panel a[href^="/results/"]');
+      await page.getByRole('tab', { name: 'Расчёт игроков' }).click();
+      await expect(page.getByRole('tab', { name: 'Расчёт игроков', selected: true })).toBeVisible();
+
+      const playerLinks = page.locator('#notion-results ul.glass-panel a[href^="/results/"]');
       await expect(playerLinks.first()).toBeVisible({ timeout: 20_000 });
 
       const otherPlayerLink = playerLinks.filter({ hasNotText: '(вы)' }).first();

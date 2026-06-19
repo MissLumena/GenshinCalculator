@@ -1,17 +1,30 @@
 /**
  * V2 — общие UI-компоненты: шапка, аватары, карточки, графики.
  */
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ELEMENT_COLORS, getCharacterIconUrls, getCharacterSplashUrls, getCharacterConstellationPortraitUrls } from './mockData';
+import { ELEMENT_COLORS, ELEMENTAL_RES_BONUS_OPTIONS, getCharacterIconUrls, getCharacterSplashUrls, getCharacterConstellationPortraitUrls, getTravelerDuoPortraitSets } from './mockData';
+import { OAUTH_PROVIDER_MAILRU } from './lib/oauthPolicy';
 import {
   fetchCharacterConstellationData,
   getConstellationLevelIconUrl,
   getConstellationShapeUrl,
 } from './services/constellationService';
+import { fetchCharacterTalents } from './services/talentService';
+import { getConstellationElementKey } from './constellationThemes';
+import { prepareConstellationImageCandidates, prepareConstellationImageUrl } from './constellationImageUtils';
+import { resolveNotionTeamCharacters } from './lib/notionCharacterMatch';
+import {
+  isTravelerCharacter,
+  normalizeTravelerElement,
+  TRAVELER_CONSTELLATION_ELEMENTS,
+  TRAVELER_ELEMENT_LABELS_RU,
+} from './travelerConstellations';
 import { useAppState } from './context';
-import { validateDisplayName, formatDisplayName } from './lib/displayName';
+import { validateDisplayName, formatDisplayName, isSuperuserDisplayName } from './lib/displayName';
+import { fetchAuthCountryPolicy } from './services/geoCountryService';
+import { resultsPageHref } from './lib/resultsTabs';
 import {
   formatCharacterChartLabel,
   getCharacterNameEn,
@@ -26,6 +39,8 @@ import {
   normalizeWeaponType,
   enrichWeapon,
   WEAPON_TYPE_LABELS_RU,
+  getSignatureWeaponId,
+  sortWeaponsWithSignatureFirst,
 } from './weapons';
 import {
   getEnrichedArtifactSets,
@@ -174,7 +189,7 @@ function weaponMatchesQuery(weapon, query) {
     || (weapon.description || '').toLowerCase().includes(q);
 }
 
-function WeaponPickerCard({ weapon, selected, disabled, disabledReason, onSelect }) {
+function WeaponPickerCard({ weapon, selected, disabled, disabledReason, onSelect, isSignature }) {
   return (
     <button
       type="button"
@@ -186,12 +201,19 @@ function WeaponPickerCard({ weapon, selected, disabled, disabledReason, onSelect
           ? 'cursor-not-allowed border-white/10 bg-slate-900/25 opacity-55'
           : selected
             ? 'border-genshin-gold bg-slate-900/70 ring-1 ring-genshin-gold/60'
-            : 'border-white/30 bg-slate-900/55 hover:bg-slate-900/70'
+            : isSignature
+              ? 'border-genshin-gold/45 bg-slate-900/60 hover:bg-slate-900/75'
+              : 'border-white/30 bg-slate-900/55 hover:bg-slate-900/70'
       }`}
     >
       <WeaponIcon weaponId={weapon.id} size="lg" rarity={weapon.rarity} />
       <div className="min-w-0 flex-1">
-        <p className="font-medium leading-snug text-white">{weapon.nameRu}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium leading-snug text-white">{weapon.nameRu}</p>
+          {isSignature ? (
+            <span className="accent-badge-sm">сигна</span>
+          ) : null}
+        </div>
         <p className="text-xs text-white/85">{weapon.nameEn} · {weapon.rarity}★</p>
         {weapon.passiveName ? (
           <p className="mt-1 text-xs font-semibold text-genshin-gold">{weapon.passiveName}</p>
@@ -209,20 +231,28 @@ function WeaponPickerCard({ weapon, selected, disabled, disabledReason, onSelect
   );
 }
 
-export function WeaponPicker({ characterWeaponType, value, onChange }) {
+export function WeaponPicker({ characterWeaponType, characterId, value, onChange }) {
   const [query, setQuery] = useState('');
   const [viewMode, setViewMode] = useState('all');
 
   const normalizedType = normalizeWeaponType(characterWeaponType);
+  const signatureWeaponId = useMemo(
+    () => getSignatureWeaponId(characterId, normalizedType),
+    [characterId, normalizedType],
+  );
   const compatibleWeapons = useMemo(
-    () => getWeaponsForType(normalizedType).map(enrichWeapon),
-    [normalizedType],
+    () => sortWeaponsWithSignatureFirst(
+      getWeaponsForType(normalizedType).map(enrichWeapon),
+      signatureWeaponId,
+    ),
+    [normalizedType, signatureWeaponId],
   );
   const catalogTotal = getWeaponCatalogTotal();
 
   const groupedWeapons = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filterList = (list) => list.filter((weapon) => weaponMatchesQuery(weapon, q));
+    const sortList = (list) => sortWeaponsWithSignatureFirst(list, signatureWeaponId);
 
     if (viewMode === 'compatible') {
       return [{
@@ -237,7 +267,7 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
       .map((group) => ({
         ...group,
         forCharacter: group.type === normalizedType,
-        weapons: filterList(group.weapons),
+        weapons: sortList(filterList(group.weapons)),
       }))
       .filter((group) => group.weapons.length > 0);
 
@@ -248,7 +278,7 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
     }
 
     return groups;
-  }, [compatibleWeapons, normalizedType, query, viewMode]);
+  }, [compatibleWeapons, normalizedType, query, signatureWeaponId, viewMode]);
 
   const visibleCount = groupedWeapons.reduce((sum, group) => sum + group.weapons.length, 0);
   const typeLabel = WEAPON_TYPE_LABELS_RU[normalizedType] || normalizedType;
@@ -257,10 +287,10 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
     <div className="space-y-3">
       <div className="rounded-xl border border-white/25 bg-slate-900/45 px-4 py-3">
         <p className="text-sm font-medium text-white">
-          Каталог оружия · всего {catalogTotal}
+          Каталог оружия · всего <span className="accent-count">{catalogTotal}</span>
         </p>
-        <p className="mt-1 text-xs text-white/90">
-          Для персонажа ({typeLabel}): {compatibleWeapons.length}
+        <p className="mt-1 text-xs text-white">
+          Для персонажа ({typeLabel}): <span className="accent-count">{compatibleWeapons.length}</span>
           {normalizedType ? '' : ' · тип оружия не распознан'}
         </p>
       </div>
@@ -271,22 +301,22 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
           onClick={() => setViewMode('all')}
           className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
             viewMode === 'all'
-              ? 'bg-genshin-gold text-slate-900'
+              ? 'accent-filter-active'
               : 'border border-white/30 bg-slate-900/45 text-white hover:bg-slate-900/65'
           }`}
         >
-          Весь каталог ({catalogTotal})
+          Весь каталог (<span className={viewMode === 'all' ? '' : 'accent-count'}>{catalogTotal}</span>)
         </button>
         <button
           type="button"
           onClick={() => setViewMode('compatible')}
           className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
             viewMode === 'compatible'
-              ? 'bg-genshin-gold text-slate-900'
+              ? 'accent-filter-active'
               : 'border border-white/30 bg-slate-900/45 text-white hover:bg-slate-900/65'
           }`}
         >
-          Только {typeLabel.toLowerCase()} ({compatibleWeapons.length})
+          Только {typeLabel.toLowerCase()} (<span className={viewMode === 'compatible' ? '' : 'accent-count'}>{compatibleWeapons.length}</span>)
         </button>
         <input
           type="search"
@@ -320,11 +350,11 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
             <section key={group.type || group.label}>
               <h3 className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
                 <span>{group.label}</span>
-                <span className="rounded-full bg-slate-900/60 px-2 py-0.5 text-xs font-normal text-white/90">
+                <span className="rounded-full bg-slate-900/60 px-2 py-0.5 text-xs font-normal accent-count">
                   {group.weapons.length}
                 </span>
                 {group.forCharacter ? (
-                  <span className="rounded-full bg-genshin-gold/90 px-2 py-0.5 text-xs font-medium text-slate-900">
+                  <span className="accent-badge-sm">
                     для персонажа
                   </span>
                 ) : null}
@@ -340,6 +370,7 @@ export function WeaponPicker({ characterWeaponType, value, onChange }) {
                       disabled={!canEquip}
                       disabledReason={`Только ${typeLabel.toLowerCase()} для этого персонажа`}
                       onSelect={onChange}
+                      isSignature={weapon.id === signatureWeaponId}
                     />
                   );
                 })}
@@ -458,7 +489,11 @@ export function ArtifactSetPicker({
       {showCatalogHeader ? (
         <div className="rounded-xl border border-white/25 bg-slate-900/45 px-4 py-3">
           <p className="text-sm font-medium text-white">
-            {title || `Каталог артефактов · всего ${catalogTotal}`}
+            {title || (
+              <>
+                Каталог артефактов · всего <span className="accent-count">{catalogTotal}</span>
+              </>
+            )}
           </p>
           <p className="mt-1 text-xs text-white/90">
             {subtitle || `Все сеты до версии ${ARTIFACT_CATALOG_MAX_VERSION} включительно`}
@@ -559,12 +594,13 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-base font-semibold text-white">Тип сборки артефактов</p>
-            <p className="mt-1 text-xs text-white/85">
-              Каталог до версии {ARTIFACT_CATALOG_MAX_VERSION} · {catalogTotal} сетов
+            <p className="mt-1 text-xs text-white/90">
+              Каталог до версии {ARTIFACT_CATALOG_MAX_VERSION} ·{' '}
+              <span className="accent-count">{catalogTotal}</span> сетов
             </p>
           </div>
           {isDualLoadout ? (
-            <span className="rounded-full bg-genshin-gold px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-900">
+            <span className="accent-badge-md">
               4 + 2
             </span>
           ) : null}
@@ -599,7 +635,7 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-genshin-gold/40 bg-slate-900/60 px-4 py-3">
-        <span className="text-xs font-medium uppercase tracking-wide text-genshin-gold">Сборка:</span>
+            <span className="text-xs font-medium uppercase tracking-wide accent-count">Сборка:</span>
         {primarySet ? (
           <button
             type="button"
@@ -616,7 +652,7 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
           >
             <ArtifactSetIcon setId={primarySet.id} size="sm" />
             {primarySet.nameRu}
-            <span className="text-xs text-genshin-gold">{isDualLoadout ? '×4' : '×5'}</span>
+            <span className="accent-count">{isDualLoadout ? '×4' : '×5'}</span>
           </button>
         ) : (
           <span className="text-sm text-white/70">Основной сет не выбран</span>
@@ -636,7 +672,7 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
               >
                 <ArtifactSetIcon setId={secondarySet.id} size="sm" />
                 {secondarySet.nameRu}
-                <span className="text-xs text-genshin-gold">×2</span>
+                <span className="accent-count">×2</span>
               </button>
             ) : (
               <button
@@ -662,22 +698,22 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
             onClick={() => setActiveSlot('primary')}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
               activeSlot === 'primary'
-                ? 'bg-genshin-gold text-slate-900'
+                ? 'accent-filter-active'
                 : 'bg-slate-900/70 text-white hover:bg-slate-800'
             }`}
           >
-            Редактировать сет 1 (4pc)
+            Редактировать сет 1 (<span className={activeSlot === 'primary' ? '' : 'accent-count'}>4pc</span>)
           </button>
           <button
             type="button"
             onClick={() => setActiveSlot('secondary')}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
               activeSlot === 'secondary'
-                ? 'bg-genshin-gold text-slate-900'
+                ? 'accent-filter-active'
                 : 'bg-slate-900/70 text-white hover:bg-slate-800'
             }`}
           >
-            Редактировать сет 2 (2pc)
+            Редактировать сет 2 (<span className={activeSlot === 'secondary' ? '' : 'accent-count'}>2pc</span>)
           </button>
         </div>
       ) : null}
@@ -687,8 +723,10 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
         onChange={handleCatalogChange}
         title={
           isDualLoadout
-            ? (activeSlot === 'secondary' ? 'Каталог · второй сет (2pc)' : 'Каталог · основной сет (4pc)')
-            : `Каталог артефактов · всего ${catalogTotal}`
+            ? (activeSlot === 'secondary'
+              ? <>Каталог · второй сет (<span className="accent-count">2pc</span>)</>
+              : <>Каталог · основной сет (<span className="accent-count">4pc</span>)</>)
+            : undefined
         }
         subtitle={
           isDualLoadout
@@ -710,7 +748,7 @@ export function DualArtifactSetPicker({ set, set2, onChange }) {
 }
 
 /* ─── Аватар персонажа (jmp.blue → enka.network fallback) ─── */
-export function CharacterAvatar({ character, size = 'md', className = '' }) {
+export function CharacterAvatar({ character, size = 'md', className = '', nameFallback = '' }) {
   const [urlIndex, setUrlIndex] = useState(0);
   const [failed, setFailed] = useState(false);
   const sizes = { xs: 'h-8 w-8', sm: 'h-10 w-10', md: 'h-14 w-14', lg: 'h-20 w-20', xl: 'h-24 w-24' };
@@ -733,9 +771,10 @@ export function CharacterAvatar({ character, size = 'md', className = '' }) {
   };
 
   if (!character || failed || !currentUrl) {
+    const fallbackLetter = character?.nameRu?.[0] || nameFallback?.[0] || '?';
     return (
       <div className={`${sizeClass} flex shrink-0 items-center justify-center rounded-full border border-white/40 bg-white/25 text-xs text-white/90 ${className}`}>
-        {character?.nameRu?.[0] || '?'}
+        {fallbackLetter}
       </div>
     );
   }
@@ -784,7 +823,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Главная', icon: 'home' },
   { to: '/characters', label: 'Персонажи', icon: 'characters' },
   { to: '/team', label: 'Команда', icon: 'team' },
-  { to: '/results', label: 'Результаты', icon: 'results' },
+  { to: '/results#notion-results', label: 'Результаты', icon: 'results' },
 ];
 
 function NavIcon({ name }) {
@@ -823,18 +862,23 @@ function NavIcon({ name }) {
 }
 
 function isNavActive(pathname, to) {
+  if (to.startsWith('/results')) {
+    return pathname === '/results' || pathname.startsWith('/results/');
+  }
   return pathname === to || (to !== '/' && pathname.startsWith(to));
 }
 
 /* ─── Навигационная шапка ─── */
 export function Header() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const {
     isAuthenticated,
     authLoading,
     session,
     signIn,
     signUp,
+    signInWithOAuth,
     signOut,
     actionLoading,
     profileDisplayName,
@@ -849,13 +893,38 @@ export function Header() {
   const [registerName, setRegisterName] = useState('');
   const [editName, setEditName] = useState('');
   const [authError, setAuthError] = useState(null);
+  const [authFieldErrors, setAuthFieldErrors] = useState({});
   const [nameEditError, setNameEditError] = useState(null);
+  const [authCountryPolicy, setAuthCountryPolicy] = useState(null);
+  const [authCountryLoading, setAuthCountryLoading] = useState(false);
+
+  useEffect(() => {
+    if (!authOpen) return undefined;
+
+    let cancelled = false;
+    setAuthCountryLoading(true);
+
+    fetchAuthCountryPolicy()
+      .then((policy) => {
+        if (!cancelled) setAuthCountryPolicy(policy);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthCountryLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [authOpen]);
+
+  const oauthAllowed = authCountryPolicy?.oauthAllowed !== false;
+  const resultsHref = resultsPageHref(isAuthenticated);
+  const headerDisplayName = profileDisplayName || formatDisplayName(session?.user?.email?.split('@')[0]);
 
   const resetAuthForm = () => {
     setEmail('');
     setPassword('');
     setRegisterName('');
     setAuthError(null);
+    setAuthFieldErrors({});
   };
 
   const openNameEdit = () => {
@@ -869,7 +938,9 @@ export function Header() {
     setNameEditError(null);
     const nameError = validateDisplayName(editName);
     if (nameError) {
-      setNameEditError(nameError);
+      const err = new Error(nameError);
+      err.field = 'displayName';
+      setNameEditError(err.message);
       return;
     }
     try {
@@ -883,13 +954,14 @@ export function Header() {
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthFieldErrors({});
     try {
       if (authMode === 'signin') {
         await signIn(email, password);
       } else {
         const nameError = validateDisplayName(registerName);
         if (nameError) {
-          setAuthError(nameError);
+          setAuthFieldErrors({ displayName: nameError });
           return;
         }
         await signUp(email, password, registerName);
@@ -897,14 +969,41 @@ export function Header() {
       setAuthOpen(false);
       resetAuthForm();
     } catch (err) {
-      setAuthError(err.message || 'Ошибка авторизации');
+      const field = err.field || 'form';
+      if (field === 'form') {
+        setAuthError(err.message || 'Ошибка авторизации');
+        setAuthFieldErrors({});
+      } else {
+        setAuthFieldErrors({ [field]: err.message || 'Ошибка авторизации' });
+        setAuthError(null);
+      }
     }
   };
 
   const openAuth = (mode) => {
     setAuthMode(mode);
     setAuthError(null);
+    setAuthCountryPolicy(null);
     setAuthOpen(true);
+  };
+
+  const handleOAuthClick = async (provider) => {
+    setAuthError(null);
+    try {
+      const policy = authCountryPolicy || await fetchAuthCountryPolicy();
+      await signInWithOAuth(provider, policy.countryCode);
+    } catch (err) {
+      setAuthError(err.message || 'Ошибка OAuth');
+    }
+  };
+
+  const handleLogout = async () => {
+    navigate('/', { replace: true });
+    try {
+      await signOut();
+    } catch {
+      // Ошибка выхода показывается через actionError в App.
+    }
   };
 
   return (
@@ -913,7 +1012,7 @@ export function Header() {
         {NAV_ITEMS.map(({ to, label, icon }) => (
           <Link
             key={to}
-            to={to}
+            to={to.startsWith('/results') ? resultsHref : to}
             title={label}
             className={`rail-link ${isNavActive(pathname, to) ? 'rail-link-active' : ''}`}
           >
@@ -928,7 +1027,7 @@ export function Header() {
             {NAV_ITEMS.map(({ to, icon, label }) => (
               <Link
                 key={to}
-                to={to}
+                to={to.startsWith('/results') ? resultsHref : to}
                 title={label}
                 className={`rail-link !h-9 !w-9 ${isNavActive(pathname, to) ? 'rail-link-active' : ''}`}
               >
@@ -956,12 +1055,14 @@ export function Header() {
                   <button
                     type="button"
                     onClick={openNameEdit}
-                    className="btn-pill-ghost max-w-[120px] truncate !px-4 !py-1.5 text-xs sm:max-w-[160px]"
+                    className={`btn-pill-ghost max-w-[120px] truncate !px-4 !py-1.5 text-xs sm:max-w-[160px] ${
+                      isSuperuserDisplayName(headerDisplayName) ? '!text-genshin-mintbright' : ''
+                    }`}
                     title="Изменить имя"
                   >
-                    {profileDisplayName || formatDisplayName(session?.user?.email?.split('@')[0])}
+                    {headerDisplayName}
                   </button>
-                  <button type="button" onClick={signOut} className="btn-pill-solid !px-4 !py-1.5 text-xs">
+                  <button type="button" onClick={handleLogout} className="btn-pill-solid !px-4 !py-1.5 text-xs">
                     Выйти
                   </button>
                 </>
@@ -1010,6 +1111,9 @@ export function Header() {
                 autoComplete="nickname"
               />
             )}
+            {authFieldErrors.displayName ? (
+              <p className="text-sm text-red-300">{authFieldErrors.displayName}</p>
+            ) : null}
             <input
               type="email"
               required
@@ -1018,6 +1122,9 @@ export function Header() {
               onChange={(e) => setEmail(e.target.value)}
               className="glass-input w-full px-3 py-2 text-sm"
             />
+            {authFieldErrors.email ? (
+              <p className="text-sm text-red-300">{authFieldErrors.email}</p>
+            ) : null}
             <input
               type="password"
               required
@@ -1027,6 +1134,9 @@ export function Header() {
               onChange={(e) => setPassword(e.target.value)}
               className="glass-input w-full px-3 py-2 text-sm"
             />
+            {authFieldErrors.password ? (
+              <p className="text-sm text-red-300">{authFieldErrors.password}</p>
+            ) : null}
             {authError && (
               <p className="text-sm text-red-300">{authError}</p>
             )}
@@ -1038,6 +1148,49 @@ export function Header() {
               {actionLoading ? 'Загрузка...' : authMode === 'signin' ? 'Войти' : 'Зарегистрироваться'}
             </button>
           </form>
+
+          <div className="mt-4 space-y-2">
+            <p className="text-center text-xs text-white/60">или</p>
+            <button
+              type="button"
+              disabled={actionLoading || authCountryLoading}
+              onClick={() => handleOAuthClick(OAUTH_PROVIDER_MAILRU)}
+              className="btn-pill-ghost w-full disabled:opacity-50"
+            >
+              {authMode === 'signin' ? 'Войти через Mail.ru' : 'Регистрация через Mail.ru'}
+            </button>
+            {oauthAllowed ? (
+              <>
+                <button
+                  type="button"
+                  disabled={actionLoading || authCountryLoading}
+                  onClick={() => handleOAuthClick('google')}
+                  className="btn-pill-ghost w-full disabled:opacity-50"
+                >
+                  {authMode === 'signin' ? 'Войти через Google' : 'Регистрация через Google'}
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading || authCountryLoading}
+                  onClick={() => handleOAuthClick('apple')}
+                  className="btn-pill-ghost w-full disabled:opacity-50"
+                >
+                  {authMode === 'signin' ? 'Войти через Apple' : 'Регистрация через Apple'}
+                </button>
+              </>
+            ) : null}
+            {authCountryLoading ? (
+              <p className="rounded border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/75">
+                Проверка региона…
+              </p>
+            ) : null}
+            {!oauthAllowed && !authCountryLoading ? (
+              <p className="rounded border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/75">
+                Google и Apple недоступны из России. Используйте email, пароль или Mail.ru.
+              </p>
+            ) : null}
+          </div>
+
           <button
             type="button"
             onClick={() => {
@@ -1145,7 +1298,9 @@ export function Tooltip({ text, formula, children }) {
 }
 
 /* ─── Поле ввода с валидацией диапазона ─── */
-export function InputField({ label, value, onChange, min, max, step = 1, suffix = '', tooltip }) {
+export function InputField({
+  label, value, onChange, min, max, step = 1, suffix = '', tooltip, allowEmpty = false,
+}) {
   const inputRef = useRef(null);
   const [text, setText] = useState(() => (value == null ? '' : String(value)));
 
@@ -1157,6 +1312,7 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
   const commitValue = (raw) => {
     if (raw === '' || raw === '-') {
       setText('');
+      if (allowEmpty) onChange(null);
       return;
     }
     let v = parseFloat(raw);
@@ -1170,7 +1326,10 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
   const handleChange = (e) => {
     const raw = e.target.value;
     setText(raw);
-    if (raw === '' || raw === '-') return;
+    if (raw === '' || raw === '-') {
+      if (allowEmpty) onChange(null);
+      return;
+    }
     const v = parseFloat(raw);
     if (Number.isNaN(v)) return;
     let clamped = v;
@@ -1181,7 +1340,10 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
 
   const handleBlur = () => {
     if (text === '' || text === '-') {
-      if (min !== undefined) {
+      if (allowEmpty) {
+        setText('');
+        onChange(null);
+      } else if (min !== undefined) {
         setText(String(min));
         onChange(min);
       } else {
@@ -1220,6 +1382,87 @@ export function InputField({ label, value, onChange, min, max, step = 1, suffix 
     );
   }
   return field;
+}
+
+/** Кастомный выбор бонуса сопротивления (glass + зелёное выделение). */
+export function ElementalResBonusPicker({
+  label,
+  value,
+  onChange,
+  disabledElements = [],
+  placeholder = 'Не выбрано',
+}) {
+  const rootRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const selectedOption = ELEMENTAL_RES_BONUS_OPTIONS.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+
+  const handleSelect = (nextValue) => {
+    onChange(nextValue);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} className="res-bonus-picker">
+      <span className="mb-1 block text-sm text-white/85">{label}</span>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`res-bonus-picker__trigger w-full px-3 py-2 text-left text-sm text-white ${
+          selectedOption ? 'is-selected' : ''
+        }`}
+      >
+        {selectedOption?.label ?? placeholder}
+      </button>
+      {open ? (
+        <ul className="res-bonus-picker__menu" role="listbox">
+          <li>
+            <button
+              type="button"
+              role="option"
+              aria-selected={!value}
+              className={`res-bonus-picker__option ${!value ? 'is-selected' : ''}`}
+              onClick={() => handleSelect(null)}
+            >
+              {placeholder}
+            </button>
+          </li>
+          {ELEMENTAL_RES_BONUS_OPTIONS.map((option) => {
+            const isDisabled = disabledElements.includes(option.value) && option.value !== value;
+            const isSelected = value === option.value;
+            return (
+              <li key={option.value}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  disabled={isDisabled}
+                  className={`res-bonus-picker__option ${isSelected ? 'is-selected' : ''}`}
+                  onClick={() => handleSelect(option.value)}
+                >
+                  {option.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 /* ─── Карточка персонажа для витрины (главная) ─── */
@@ -1281,10 +1524,10 @@ export function CharacterCard({
         compact ? 'p-2' : 'p-4'
       } ${
         disabled
-          ? 'cursor-not-allowed border-gray-800 opacity-40'
+          ? 'cursor-not-allowed border-white/25 opacity-50'
           : selected
             ? 'cursor-pointer border-genshin-gold shadow-md'
-            : 'cursor-pointer border-gray-700 hover:border-genshin-gold/60 hover:shadow-md'
+            : 'cursor-pointer border-white/35 hover:border-genshin-gold/60 hover:shadow-md'
       }`}
       onClick={disabled ? undefined : onClick}
       role="button"
@@ -1298,7 +1541,7 @@ export function CharacterCard({
           <CharacterNameLabel
             character={character}
             primaryClassName="truncate text-sm font-medium text-white"
-            secondaryClassName="truncate text-xs text-white/55"
+            secondaryClassName="truncate text-xs text-white/85"
           />
           <div className="mt-1 flex items-center gap-1">
             <span className={`rounded px-1.5 py-0.5 text-[10px] text-white ${elColor}`}>{character.element}</span>
@@ -1306,7 +1549,7 @@ export function CharacterCard({
           </div>
         </div>
         {disabled && (
-          <span className="shrink-0 text-[10px] text-gray-500">В команде</span>
+          <span className="shrink-0 text-[10px] text-white/90">В команде</span>
         )}
       </div>
     </article>
@@ -1392,17 +1635,58 @@ export function CharacterPickerBar({ characters, selectedId, onSelect }) {
   );
 }
 
+export function TravelerDuoConstellationPortrait() {
+  const [aetherIndex, setAetherIndex] = useState(0);
+  const [lumineIndex, setLumineIndex] = useState(0);
+  const portraitSets = useMemo(() => getTravelerDuoPortraitSets(), []);
+
+  const aetherUrl = portraitSets.aether[aetherIndex];
+  const lumineUrl = portraitSets.lumine[lumineIndex];
+
+  return (
+    <div className="constellation-character constellation-character--traveler-duo">
+      {aetherUrl ? (
+        <img
+          src={aetherUrl}
+          alt="Эттер"
+          className="constellation-portrait-img constellation-portrait-img--traveler-duo"
+          onError={() => {
+            if (aetherIndex < portraitSets.aether.length - 1) {
+              setAetherIndex((index) => index + 1);
+            }
+          }}
+        />
+      ) : null}
+      {lumineUrl ? (
+        <img
+          src={lumineUrl}
+          alt="Люмин"
+          className="constellation-portrait-img constellation-portrait-img--traveler-duo"
+          onError={() => {
+            if (lumineIndex < portraitSets.lumine.length - 1) {
+              setLumineIndex((index) => index + 1);
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function ConstellationPortrait({ character }) {
   const [portraitIndex, setPortraitIndex] = useState(0);
+  const portraitUrls = useMemo(
+    () => getCharacterConstellationPortraitUrls(character),
+    [character],
+  );
 
   useEffect(() => {
     setPortraitIndex(0);
   }, [character?.id]);
 
-  const portraitUrls = useMemo(
-    () => getCharacterConstellationPortraitUrls(character),
-    [character],
-  );
+  if (isTravelerCharacter(character)) {
+    return <TravelerDuoConstellationPortrait />;
+  }
 
   return (
     <div className="constellation-character">
@@ -1424,28 +1708,132 @@ function ConstellationPortrait({ character }) {
   );
 }
 
-function ConstellationShapeArt({ shapeUrlCandidates = [], characterId }) {
+const CONSTELLATION_FALLBACK_NODES = [
+  { level: 1, x: 120, y: 38 },
+  { level: 2, x: 188, y: 74 },
+  { level: 3, x: 188, y: 146 },
+  { level: 4, x: 120, y: 182 },
+  { level: 5, x: 52, y: 146 },
+  { level: 6, x: 52, y: 74 },
+];
+
+const CONSTELLATION_FALLBACK_EDGES = [
+  [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 1], [1, 4], [2, 5], [3, 6],
+];
+
+export function ConstellationShapeFallback({ constellationName = '', activeLevel = 1 }) {
+  const nodeByLevel = Object.fromEntries(
+    CONSTELLATION_FALLBACK_NODES.map((node) => [node.level, node]),
+  );
+
+  return (
+    <svg
+      className="constellation-shape-fallback"
+      viewBox="0 0 240 240"
+      aria-label={constellationName || 'Созвездие'}
+      role="img"
+    >
+      <defs>
+        <radialGradient id="constellationFallbackGlow" cx="50%" cy="46%" r="52%">
+          <stop offset="0%" stopColor="var(--const-shape-glow)" stopOpacity="0.45" />
+          <stop offset="55%" stopColor="var(--const-shape-glow-soft)" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="120" cy="110" r="92" fill="url(#constellationFallbackGlow)" />
+      {CONSTELLATION_FALLBACK_EDGES.map(([fromLevel, toLevel], index) => {
+        const from = nodeByLevel[fromLevel];
+        const to = nodeByLevel[toLevel];
+        return (
+          <line
+            key={`edge-${fromLevel}-${toLevel}-${index}`}
+            x1={from.x}
+            y1={from.y}
+            x2={to.x}
+            y2={to.y}
+            className="constellation-shape-fallback__edge"
+          />
+        );
+      })}
+      {CONSTELLATION_FALLBACK_NODES.map((node) => {
+        const isActive = node.level === activeLevel;
+        return (
+          <g
+            key={node.level}
+            className={isActive ? 'constellation-shape-fallback__node is-active' : 'constellation-shape-fallback__node'}
+          >
+            {isActive ? (
+              <circle
+                cx={node.x}
+                cy={node.y}
+                r={18}
+                className="constellation-shape-fallback__halo"
+              />
+            ) : null}
+            <circle
+              cx={node.x}
+              cy={node.y}
+              r={isActive ? 9 : 6.5}
+              className="constellation-shape-fallback__star"
+            />
+          </g>
+        );
+      })}
+      {constellationName ? (
+        <text x="120" y="224" textAnchor="middle" className="constellation-shape-fallback__label">
+          {constellationName}
+        </text>
+      ) : null}
+    </svg>
+  );
+}
+
+function ConstellationShapeArt({
+  shapeUrlCandidates = [],
+  characterId,
+  element,
+  constellationName,
+  activeLevel,
+}) {
   const [urlIndex, setUrlIndex] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  const preparedCandidates = useMemo(
+    () => prepareConstellationImageCandidates(shapeUrlCandidates),
+    [shapeUrlCandidates],
+  );
 
   useEffect(() => {
     setUrlIndex(0);
-  }, [shapeUrlCandidates]);
+    setFailed(false);
+  }, [preparedCandidates]);
 
-  const currentUrl = shapeUrlCandidates[urlIndex];
+  const currentUrl = preparedCandidates[urlIndex];
 
-  if (!currentUrl) return null;
+  if (!currentUrl || failed) {
+    return (
+      <ConstellationShapeFallback
+        constellationName={constellationName}
+        activeLevel={activeLevel}
+      />
+    );
+  }
 
-  const shapeClassName = getConstellationShapeImgClassName(characterId);
+  const shapeClassName = getConstellationShapeImgClassName(characterId, element);
 
   return (
     <img
       src={currentUrl}
       alt=""
       className={shapeClassName}
+      referrerPolicy="no-referrer"
+      decoding="async"
       onError={() => {
-        if (urlIndex < shapeUrlCandidates.length - 1) {
+        if (urlIndex < preparedCandidates.length - 1) {
           setUrlIndex((index) => index + 1);
+          return;
         }
+        setFailed(true);
       }}
     />
   );
@@ -1453,11 +1841,17 @@ function ConstellationShapeArt({ shapeUrlCandidates = [], characterId }) {
 
 const BRIGHT_CONSTELLATION_SHAPE_IDS = new Set(['ororon']);
 
-export function getConstellationShapeImgClassName(characterId) {
-  if (BRIGHT_CONSTELLATION_SHAPE_IDS.has(characterId)) {
-    return 'constellation-shape-img constellation-shape-img--bright';
+export function getConstellationShapeImgClassName(characterId, element) {
+  const classes = ['constellation-shape-img'];
+
+  if (element) {
+    classes.push('constellation-shape-img--enhanced');
   }
-  return 'constellation-shape-img';
+  if (BRIGHT_CONSTELLATION_SHAPE_IDS.has(characterId)) {
+    classes.push('constellation-shape-img--extra-bright');
+  }
+
+  return classes.join(' ');
 }
 
 const HIGHLIGHT_TERMS = [
@@ -1515,24 +1909,57 @@ export function highlightConstellationText(text) {
 }
 
 /* ─── Панель созвездий (референс UI) ─── */
+function TravelerElementTabs({ activeElement, onChange }) {
+  return (
+    <div
+      className="constellation-element-tabs"
+      role="tablist"
+      aria-label="Стихия путешественника"
+    >
+      {TRAVELER_CONSTELLATION_ELEMENTS.map((element) => {
+        const isActive = activeElement === element;
+        return (
+          <button
+            key={element}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            className={`constellation-element-tab constellation-element-tab--${element.toLowerCase()} ${isActive ? 'is-active' : ''}`}
+            onClick={() => onChange(element)}
+          >
+            {TRAVELER_ELEMENT_LABELS_RU[element]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ConstellationPanel({
   character,
   activeLevel,
   onActiveLevelChange,
 }) {
   const [internalLevel, setInternalLevel] = useState(1);
+  const [themeElement, setThemeElement] = useState(character?.element);
   const [items, setItems] = useState([]);
   const [constellationName, setConstellationName] = useState('');
   const [shapeUrlCandidates, setShapeUrlCandidates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [travelerElement, setTravelerElement] = useState(() => normalizeTravelerElement(character?.element));
 
+  const isTraveler = isTravelerCharacter(character);
   const currentLevel = activeLevel ?? internalLevel;
 
   useEffect(() => {
     setInternalLevel(1);
-  }, [character?.id]);
+    setThemeElement(character?.element);
+    if (isTravelerCharacter(character)) {
+      setTravelerElement(normalizeTravelerElement(character?.element));
+    }
+  }, [character?.id, character?.element]);
 
   useEffect(() => {
     if (!character) {
@@ -1545,7 +1972,11 @@ export function ConstellationPanel({
     setLoadError(null);
     setUnavailable(false);
 
-    fetchCharacterConstellationData(character)
+    const fetchOptions = isTravelerCharacter(character)
+      ? { element: travelerElement }
+      : {};
+
+    fetchCharacterConstellationData(character, fetchOptions)
       .then((data) => {
         if (cancelled) return;
         if (data.unavailable || !data.items?.length) {
@@ -1557,6 +1988,7 @@ export function ConstellationPanel({
         }
         setItems(data.items);
         setConstellationName(data.constellationName);
+        setThemeElement(data.element || character.element);
         setShapeUrlCandidates(
           data.shapeUrlCandidates?.length
             ? data.shapeUrlCandidates
@@ -1573,7 +2005,7 @@ export function ConstellationPanel({
       });
 
     return () => { cancelled = true; };
-  }, [character]);
+  }, [character, travelerElement]);
 
   if (!character) return null;
 
@@ -1589,14 +2021,33 @@ export function ConstellationPanel({
     }
   };
 
+  const handleTravelerElementChange = (element) => {
+    setTravelerElement(element);
+    handleSelect(1);
+  };
+
   const constellationNodes = items
     .filter((item) => item.level >= 1 && item.level <= 6)
     .sort((a, b) => a.level - b.level);
 
+  const elementKey = getConstellationElementKey(
+    isTraveler ? travelerElement : (themeElement || character.element),
+  );
+
   return (
-    <section className="constellation-panel" aria-label={`Созвездия — ${getCharacterNameRu(character)}`}>
+    <section
+      className="constellation-panel"
+      data-constellation-element={elementKey}
+      aria-label={`Созвездия — ${getCharacterNameRu(character)}`}
+    >
       <div className="constellation-header">
         <span className="constellation-badge">Созвездие</span>
+        {isTraveler ? (
+          <TravelerElementTabs
+            activeElement={travelerElement}
+            onChange={handleTravelerElementChange}
+          />
+        ) : null}
         {constellationName ? (
           <p className="constellation-subtitle">{constellationName}</p>
         ) : null}
@@ -1624,6 +2075,9 @@ export function ConstellationPanel({
                 <ConstellationShapeArt
                   shapeUrlCandidates={shapeUrlCandidates}
                   characterId={character.id}
+                  element={isTraveler ? travelerElement : (themeElement || character.element)}
+                  constellationName={constellationName}
+                  activeLevel={currentLevel}
                 />
               </div>
 
@@ -1643,7 +2097,13 @@ export function ConstellationPanel({
                       className={`constellation-node ${isActive ? 'constellation-node-active' : ''}`}
                     >
                       {nodeIconUrl ? (
-                        <img src={nodeIconUrl} alt="" className="constellation-node-icon" />
+                        <img
+                          src={prepareConstellationImageUrl(nodeIconUrl) || nodeIconUrl}
+                          alt=""
+                          className="constellation-node-icon"
+                          referrerPolicy="no-referrer"
+                          decoding="async"
+                        />
                       ) : (
                         `C${item.level}`
                       )}
@@ -1669,6 +2129,437 @@ export function ConstellationPanel({
         </div>
       )}
     </section>
+  );
+}
+
+export function CharacterTalentsPanel({ character, showHeader = true }) {
+  const [themeElement, setThemeElement] = useState(character?.element);
+  const [talents, setTalents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [travelerElement, setTravelerElement] = useState(() => normalizeTravelerElement(character?.element));
+
+  const isTraveler = isTravelerCharacter(character);
+
+  useEffect(() => {
+    setThemeElement(character?.element);
+    if (isTravelerCharacter(character)) {
+      setTravelerElement(normalizeTravelerElement(character?.element));
+    }
+  }, [character?.id, character?.element]);
+
+  useEffect(() => {
+    if (!character) {
+      setTalents([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    setUnavailable(false);
+
+    const fetchOptions = isTravelerCharacter(character)
+      ? { element: travelerElement }
+      : {};
+
+    fetchCharacterTalents(character, fetchOptions)
+      .then((data) => {
+        if (cancelled) return;
+        if (data.unavailable || !data.talents?.length) {
+          setUnavailable(true);
+          setTalents([]);
+          return;
+        }
+        setTalents(data.talents);
+        setThemeElement(data.element || character.element);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error.message || 'Не удалось загрузить таланты');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [character, travelerElement]);
+
+  if (!character) return null;
+
+  const elementKey = getConstellationElementKey(
+    isTraveler ? travelerElement : (themeElement || character.element),
+  );
+
+  return (
+    <section
+      className="talent-panel"
+      data-constellation-element={elementKey}
+      aria-label={`Таланты — ${getCharacterNameRu(character)}`}
+    >
+      {showHeader ? (
+        <div className="constellation-header">
+          <span className="constellation-badge">Таланты</span>
+          {isTraveler ? (
+            <TravelerElementTabs
+              activeElement={travelerElement}
+              onChange={setTravelerElement}
+            />
+          ) : null}
+        </div>
+      ) : isTraveler ? (
+        <div className="constellation-header">
+          <TravelerElementTabs
+            activeElement={travelerElement}
+            onChange={setTravelerElement}
+          />
+        </div>
+      ) : null}
+
+      {loading && (
+        <p className="mb-4 text-center text-sm text-white">Загрузка талантов...</p>
+      )}
+      {loadError && (
+        <p className="mb-4 text-center text-sm text-red-200">{loadError}</p>
+      )}
+      {!loading && unavailable && (
+        <p className="mb-4 text-center text-sm text-white">
+          Описания талантов для этого персонажа недоступны.
+        </p>
+      )}
+
+      {!loading && talents.length > 0 && (
+        <div className="talent-list">
+          {talents.map((talent) => (
+            <article key={talent.key} className="talent-card">
+              <div className="talent-card-head">
+                {talent.iconUrl ? (
+                  <img
+                    src={talent.iconUrl}
+                    alt=""
+                    className="talent-icon"
+                    referrerPolicy="no-referrer"
+                    decoding="async"
+                  />
+                ) : (
+                  <span className="talent-icon-fallback">{talent.badge}</span>
+                )}
+                <div className="talent-card-meta">
+                  <span className="talent-type">{talent.label}</span>
+                  <h3 className="talent-name">{talent.name}</h3>
+                </div>
+              </div>
+              {talent.description ? (
+                <p className="constellation-detail-text talent-description">
+                  {highlightConstellationText(talent.description)}
+                </p>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NotionBrandMark({ className = '' }) {
+  return (
+    <span className={`notion-brand ${className}`.trim()} aria-hidden="true">
+      N
+    </span>
+  );
+}
+
+export function formatNotionDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  try {
+    const parsed = new Date(raw.includes('T') ? raw : `${raw}T12:00:00`);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return raw;
+  }
+}
+
+function formatStripDps(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return Math.round(Number(value)).toLocaleString('ru-RU');
+}
+
+export function PlayerDisplayName({
+  name,
+  fallback = 'Игрок',
+  className = '',
+}) {
+  const label = name || fallback;
+  const accentClass = isSuperuserDisplayName(label) ? 'text-genshin-mintbright' : '';
+  return (
+    <span className={[accentClass, className].filter(Boolean).join(' ')}>
+      {label}
+    </span>
+  );
+}
+
+export function ResultSummaryStrip({
+  userName,
+  isSelf = false,
+  meta = null,
+  teamEntries = [],
+  totalDps = null,
+  href = null,
+  externalHref = null,
+  className = '',
+  trailing = null,
+}) {
+  const stripBody = (
+    <>
+      <div className="result-strip-user min-w-0 shrink-0 sm:w-[7.5rem] md:w-[9rem]">
+        <p className="truncate text-sm font-semibold text-white">
+          <PlayerDisplayName name={userName} />
+          {isSelf ? (
+            <span className="ml-1.5 text-xs font-normal text-white/65">(вы)</span>
+          ) : null}
+        </p>
+        {meta ? (
+          <p className="truncate text-[11px] text-white/55">{meta}</p>
+        ) : null}
+      </div>
+
+      <ul className="result-strip-team" aria-label="Состав команды">
+        {teamEntries.length > 0 ? (
+          teamEntries.map(({ name, character, key }) => (
+            <li key={key || name} className="result-strip-avatar">
+              <CharacterAvatar
+                character={character}
+                size="xs"
+                nameFallback={name || '?'}
+              />
+            </li>
+          ))
+        ) : (
+          <li className="text-xs text-white/50">—</li>
+        )}
+      </ul>
+
+      <div className="result-strip-dps ml-auto shrink-0 text-right">
+        <span className="result-strip-dps-label">DPS</span>
+        <p className="result-strip-dps-value">{formatStripDps(totalDps)}</p>
+      </div>
+
+      {trailing ? (
+        <div className="result-strip-trailing shrink-0">{trailing}</div>
+      ) : null}
+    </>
+  );
+
+  const stripClass = `result-strip ${href || externalHref ? 'result-strip-clickable' : ''} ${className}`.trim();
+
+  if (href) {
+    return (
+      <Link to={href} className={stripClass}>
+        {stripBody}
+      </Link>
+    );
+  }
+
+  if (externalHref) {
+    return (
+      <a
+        href={externalHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={stripClass}
+      >
+        {stripBody}
+      </a>
+    );
+  }
+
+  return (
+    <article className={stripClass}>
+      {stripBody}
+    </article>
+  );
+}
+
+export function NotionResultCard({
+  item,
+  canDelete = false,
+  deleting = false,
+  onDelete,
+}) {
+  const formattedDate = formatNotionDate(item.calculated_at);
+  const teamEntries = resolveNotionTeamCharacters(item).map(({ name, character }) => ({
+    name,
+    character,
+    key: `${item.page_id}-${name}`,
+  }));
+
+  const resultHref = item.user_id ? `/results/${item.user_id}` : null;
+
+  return (
+    <div className="result-strip-row">
+      <ResultSummaryStrip
+        userName={item.user_label || 'Игрок'}
+        meta={formattedDate}
+        teamEntries={teamEntries}
+        totalDps={item.total_dps}
+        href={resultHref}
+        externalHref={!resultHref ? item.notion_url : null}
+        className="min-w-0 flex-1"
+      />
+      {canDelete ? (
+        <button
+          type="button"
+          onClick={() => onDelete?.(item.page_id)}
+          disabled={deleting}
+          className="notion-delete-btn"
+        >
+          {deleting ? '…' : 'Удалить'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function NotionResultsSection({
+  results = [],
+  notice = null,
+  error = null,
+  refreshing = false,
+  onRefresh,
+  deletingPageId = null,
+  onDelete,
+  canDeleteItem,
+  canDeleteAny = false,
+  isAuthenticated = false,
+  embedded = false,
+}) {
+  if (!isAuthenticated) {
+    return (
+      <section
+        id="notion-results"
+        className={embedded ? 'scroll-mt-24' : 'mt-10 scroll-mt-24'}
+      >
+        <div className="glass-panel p-6 text-center text-sm text-white/80">
+          Расчёт игроков доступен только зарегистрированным пользователям.
+          {' '}
+          Войдите или зарегистрируйтесь через кнопку в шапке сайта.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      id="notion-results"
+      className={embedded ? 'scroll-mt-24' : 'mt-10 scroll-mt-24'}
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        {!embedded ? (
+          <h2 className="text-lg font-semibold text-white">Расчёт игроков</h2>
+        ) : (
+          <p className="min-w-0 flex-1 text-sm text-white/75">
+            Нажмите на строку, чтобы открыть расчёт.
+            {canDeleteAny ? ' Только суперюзер может удалять записи.' : null}
+          </p>
+        )}
+        <ActionButton
+          variant="secondary"
+          className="shrink-0"
+          onClick={onRefresh}
+          disabled={refreshing}
+        >
+          {refreshing ? 'Обновление…' : 'Обновить'}
+        </ActionButton>
+      </div>
+      {!embedded ? (
+        <p className="mb-4 text-sm text-white/75">
+          Нажмите на строку, чтобы открыть расчёт.
+          {canDeleteAny ? ' Только суперюзер может удалять записи.' : null}
+        </p>
+      ) : null}
+
+      {notice ? (
+        <div className="notion-alert notion-alert-warning mb-4">{notice}</div>
+      ) : null}
+      {error ? (
+        <div className="notion-alert notion-alert-error mb-4">{error}</div>
+      ) : null}
+
+      {results.length === 0 ? (
+        <div className="glass-panel p-5 text-center text-sm text-white/80">
+          Пока нет сохранённых расчётов игроков.
+        </div>
+      ) : (
+        <ul className="result-strip-list glass-panel p-2 md:p-3">
+          {results.map((item) => (
+            <li key={item.page_id}>
+              <NotionResultCard
+                item={item}
+                canDelete={canDeleteItem?.(item)}
+                deleting={deletingPageId === item.page_id}
+                onDelete={onDelete}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+export function NotionSavePanel({
+  onSave,
+  saveState = 'idle',
+  saveError = null,
+  listHref = '/results#notion-results',
+}) {
+  const isLoading = saveState === 'loading';
+  const isSuccess = saveState === 'success';
+
+  return (
+    <div className="notion-save-panel">
+      <div className="flex flex-wrap items-start gap-4">
+        <NotionBrandMark className="hidden sm:inline-flex" />
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-white">Сохранить в Notion</h3>
+          <p className="mt-1 text-sm text-white/75">
+            Добавьте текущий расчёт в общий журнал команды.
+          </p>
+          {isLoading ? (
+            <p className="mt-2 text-sm text-white/70">Сохраняем запись…</p>
+          ) : null}
+          {isSuccess ? (
+            <p className="mt-2 text-sm text-genshin-mintbright">
+              Готово.{' '}
+              <Link to={listHref} className="underline underline-offset-2 hover:text-white">
+                Открыть журнал
+              </Link>
+            </p>
+          ) : null}
+          {saveError ? (
+            <p className="mt-2 text-sm text-red-300">{saveError}</p>
+          ) : null}
+        </div>
+        <ActionButton
+          variant={isSuccess ? 'secondary' : 'primary'}
+          onClick={onSave}
+          disabled={isLoading}
+          className="shrink-0"
+        >
+          {isLoading ? 'Сохранение…' : isSuccess ? 'Сохранено' : 'Сохранить'}
+        </ActionButton>
+      </div>
+    </div>
   );
 }
 

@@ -10,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.notion_client import NotionApiError
+from app.notion_permissions import can_delete_notion_result
 from app.notion_service import NotionService
 from app.routers import notion as notion_router
 from app.schemas import NotionResultItem, NotionSaveResultRequest
@@ -50,7 +52,9 @@ class FakeNotionService:
     def list_results(self):
         return self.items
 
-    def delete_result(self, page_id, *, requester_id, requester_role):
+    def delete_result(self, page_id, *, requester_email, settings):
+        if not can_delete_notion_result(requester_email, settings):
+            raise NotionApiError(403, 'Недостаточно прав для удаления')
         self.items = [item for item in self.items if item.page_id != page_id]
 
 
@@ -104,8 +108,17 @@ def test_save_result_success(fake_service: FakeNotionService) -> None:
     assert len(fake_service.saved) == 1
 
 
-def test_list_results_public() -> None:
+def test_list_results_requires_auth() -> None:
+    app.dependency_overrides.pop(get_authenticated_user, None)
     response = client.get('/api/notion/results')
+    assert response.status_code == 401
+
+
+def test_list_results_success(fake_service: FakeNotionService) -> None:
+    response = client.get(
+        '/api/notion/results',
+        headers={'Authorization': 'Bearer test-token'},
+    )
     assert response.status_code == 200
     body = response.json()
     items = body['items']
@@ -130,7 +143,10 @@ def test_list_results_returns_notice_when_notion_errors(
 
     monkeypatch.setattr(FakeNotionService, 'list_results', raise_notion_error)
 
-    response = client.get('/api/notion/results')
+    response = client.get(
+        '/api/notion/results',
+        headers={'Authorization': 'Bearer test-token'},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body['items'] == []
@@ -140,13 +156,46 @@ def test_list_results_returns_notice_when_notion_errors(
     get_settings.cache_clear()
 
 
-def test_delete_result_by_owner(fake_service: FakeNotionService) -> None:
+def test_delete_result_denied_for_regular_user(
+    fake_service: FakeNotionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv('SUPERUSER_EMAILS', 'kondratovic91@mail.ru')
+    get_settings.cache_clear()
+
+    response = client.delete(
+        '/api/notion/result/page-1',
+        headers={'Authorization': 'Bearer test-token'},
+    )
+    assert response.status_code == 403
+    assert len(fake_service.items) == 1
+    get_settings.cache_clear()
+
+
+def test_delete_result_by_superuser_email(
+    fake_service: FakeNotionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv('SUPERUSER_EMAILS', 'kondratovic91@mail.ru')
+    get_settings.cache_clear()
+
+    app.dependency_overrides[get_authenticated_user] = lambda: AuthUser(
+        id='super-1',
+        email='kondratovic91@mail.ru',
+        role='user',
+    )
+
     response = client.delete(
         '/api/notion/result/page-1',
         headers={'Authorization': 'Bearer test-token'},
     )
     assert response.status_code == 200
     assert len(fake_service.items) == 0
+    get_settings.cache_clear()
 
 
 def test_webhook_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -42,7 +42,7 @@ GAME_CHARACTERS: list[dict] = [
         'name_en': 'Nicole',
         'name_ru': 'Николь',
         'element': 'Electro',
-        'weapon': 'Sword',
+        'weapon': 'Catalyst',
         'rarity': 5,
         'region': 'celestia',
     },

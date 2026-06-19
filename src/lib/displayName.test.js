@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDisplayName, validateDisplayName, buildLocalResultsEntry, LOCAL_USER_ID } from '../lib/displayName';
+import { formatDisplayName, validateDisplayName, buildLocalResultsEntry, LOCAL_USER_ID, isSuperuserDisplayName } from '../lib/displayName';
 
 describe('formatDisplayName', () => {
   it('returns trimmed name', () => {
@@ -33,5 +33,16 @@ describe('buildLocalResultsEntry', () => {
       userId: LOCAL_USER_ID,
       displayName: 'Вы (локально)',
     });
+  });
+});
+
+describe('isSuperuserDisplayName', () => {
+  it('matches only the configured superuser name', () => {
+    expect(isSuperuserDisplayName('Мира')).toBe(true);
+    expect(isSuperuserDisplayName('  Мира  ')).toBe(true);
+    expect(isSuperuserDisplayName('мира')).toBe(false);
+    expect(isSuperuserDisplayName('Мира ')).toBe(true);
+    expect(isSuperuserDisplayName('Alice')).toBe(false);
+    expect(isSuperuserDisplayName('')).toBe(false);
   });
 });

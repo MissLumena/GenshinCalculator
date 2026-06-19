@@ -28,12 +28,20 @@ class Settings(BaseSettings):
 
     cors_origins: str = 'http://localhost:5173'
 
-    jwt_secret: str = 'dev-secret'
+    jwt_secret: str
     jwt_algorithm: str = 'HS256'
     jwt_expire_minutes: int = 60 * 24 * 7
 
     supabase_jwt_secret: str = ''
     supabase_jwt_audience: bool = False
+    supabase_url: str = ''
+    supabase_anon_key: str = ''
+    supabase_service_role_key: str = ''
+
+    mailru_client_id: str = ''
+    mailru_client_secret: str = ''
+    # Должен совпадать с redirect URI в oauth.mail.ru (localhost ≠ 127.0.0.1)
+    mailru_redirect_uri: str = ''
 
     notion_secret: str = ''
     notion_database_id: str = ''
@@ -41,6 +49,20 @@ class Settings(BaseSettings):
     notion_timeout_seconds: float = 15.0
     notion_webhook_secret: str = ''
     notion_startup_check: bool = True
+
+    # Email через запятую — автоматически superuser (если role не задан в Supabase)
+    superuser_emails: str = ''
+
+    # Принудительная страна для dev (ISO 3166-1, напр. RU или DE)
+    geo_country_override: str = ''
+
+    @property
+    def superuser_email_set(self) -> set[str]:
+        return {
+            email.strip().lower()
+            for email in self.superuser_emails.split(',')
+            if email.strip()
+        }
 
     @field_validator('notion_database_id', mode='before')
     @classmethod
@@ -62,6 +84,20 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
+
+    @property
+    def resolved_mailru_redirect_uri(self) -> str:
+        if self.mailru_redirect_uri.strip():
+            return self.mailru_redirect_uri.strip().rstrip('/')
+
+        for origin in self.cors_origin_list:
+            if 'localhost' in origin.lower():
+                return f'{origin.rstrip("/")}/api/auth/mailru/callback'
+
+        if self.cors_origin_list:
+            return f'{self.cors_origin_list[0].rstrip("/")}/api/auth/mailru/callback'
+
+        return 'http://localhost:5173/api/auth/mailru/callback'
 
 
 @lru_cache

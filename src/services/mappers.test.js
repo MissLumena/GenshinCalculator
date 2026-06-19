@@ -187,7 +187,145 @@ describe('mappers', () => {
     expect(config.artifacts.set).toBe('emblem-of-severed-fate');
   });
 
-  it('mergeCharacters prefers database entries and keeps local-only chars', () => {
+  it('configToDbRow and dbRowToConfig preserve elemental resistance bonuses', () => {
+    const config = {
+      characterId: 'bennett',
+      level: 90,
+      atk: { base: 300, bonus: 0 },
+      hp: 18000,
+      def: 800,
+      em: 100,
+      critRate: 50,
+      critDmg: 120,
+      energyRecharge: 120,
+      constellation: 0,
+      equippedWeaponId: null,
+      elementalResBonuses: [
+        { element: 'Pyro', value: 40 },
+        { element: 'Hydro', value: 25 },
+      ],
+      artifacts: {
+        set: 'crimson-witch-of-flames',
+        set2: null,
+        hp: 0,
+        critRate: 0,
+        critDmg: 0,
+        atkPercent: 0,
+        em: 0,
+      },
+    };
+
+    const row = configToDbRow(config, 'user-uuid');
+    expect(row.artifacts_summary._elementalResBonuses).toEqual([
+      { element: 'Pyro', value: 40 },
+      { element: 'Hydro', value: 25 },
+    ]);
+    expect(row.artifacts_summary._elementalResBonusElement).toBeUndefined();
+
+    const restored = dbRowToConfig({
+      id: 'uuid-2',
+      game_character_id: config.characterId,
+      level: config.level,
+      atk_base: config.atk.base,
+      atk_bonus: config.atk.bonus,
+      hp: config.hp,
+      defense: config.def,
+      em: config.em,
+      energy_recharge: config.energyRecharge,
+      crit_rate: config.critRate,
+      crit_dmg: config.critDmg,
+      constellation: config.constellation,
+      artifacts_summary: row.artifacts_summary,
+    });
+
+    expect(restored.elementalResBonuses).toEqual([
+      { element: 'Pyro', value: 40 },
+      { element: 'Hydro', value: 25 },
+    ]);
+  });
+
+  it('configToDbRow and dbRowToConfig preserve talent levels', () => {
+    const config = {
+      characterId: 'bennett',
+      level: 90,
+      atk: { base: 300, bonus: 0 },
+      hp: 18000,
+      def: 800,
+      em: 100,
+      critRate: 50,
+      critDmg: 120,
+      energyRecharge: 120,
+      constellation: 5,
+      equippedWeaponId: null,
+      elementalResBonuses: null,
+      talentLevels: { auto: 10, skill: 13, burst: 13 },
+      artifacts: {
+        set: 'crimson-witch-of-flames',
+        set2: null,
+        hp: 0,
+        critRate: 0,
+        critDmg: 0,
+        atkPercent: 0,
+        em: 0,
+      },
+    };
+
+    const row = configToDbRow(config, 'user-uuid');
+    expect(row.artifacts_summary._talentLevels).toEqual({
+      auto: 10,
+      skill: 13,
+      burst: 13,
+    });
+
+    const restored = dbRowToConfig({
+      id: 'uuid-4',
+      game_character_id: config.characterId,
+      level: config.level,
+      atk_base: config.atk.base,
+      atk_bonus: config.atk.bonus,
+      hp: config.hp,
+      defense: config.def,
+      em: config.em,
+      energy_recharge: config.energyRecharge,
+      crit_rate: config.critRate,
+      crit_dmg: config.critDmg,
+      constellation: config.constellation,
+      artifacts_summary: row.artifacts_summary,
+    });
+
+    expect(restored.talentLevels).toEqual({ auto: 10, skill: 13, burst: 13 });
+  });
+
+  it('dbRowToConfig reads legacy single elemental resistance bonus keys', () => {
+    const config = dbRowToConfig({
+      id: 'uuid-3',
+      game_character_id: 'zhongli',
+      level: 90,
+      atk_base: 300,
+      atk_bonus: 0,
+      hp: 18000,
+      defense: 800,
+      em: 100,
+      energy_recharge: 120,
+      crit_rate: 50,
+      crit_dmg: 120,
+      constellation: 0,
+      artifacts_summary: {
+        set: 'emblem',
+        hp: 0,
+        critRate: 0,
+        critDmg: 0,
+        atkPercent: 0,
+        em: 0,
+        _elementalResBonusElement: 'Geo',
+        _elementalResBonusValue: 35,
+      },
+    });
+
+    expect(config.elementalResBonuses).toEqual([{ element: 'Geo', value: 35 }]);
+  });
+
+  it('mergeCharacters prefers database names but local weapon and element', () => {
     const db = [
       {
         id: 'hu-tao',
@@ -198,6 +336,16 @@ describe('mappers', () => {
         rarity: 5,
         region: 'liyue',
         iconId: 'hu-tao',
+      },
+      {
+        id: 'nicole',
+        name: 'Nicole',
+        nameRu: 'Николь',
+        element: 'Electro',
+        weapon: 'Sword',
+        rarity: 5,
+        region: 'celestia',
+        iconId: 'nicole',
       },
     ];
     const local = [
@@ -212,6 +360,16 @@ describe('mappers', () => {
         iconId: 'hu-tao',
       },
       {
+        id: 'nicole',
+        name: 'Nicole',
+        nameRu: 'Николь',
+        element: 'Electro',
+        weapon: 'Catalyst',
+        rarity: 5,
+        region: 'celestia',
+        iconId: 'nicole',
+      },
+      {
         id: 'ganyu',
         name: 'Ganyu',
         nameRu: 'Гань Юй',
@@ -224,8 +382,9 @@ describe('mappers', () => {
     ];
 
     const merged = mergeCharacters(db, local);
-    expect(merged).toHaveLength(2);
+    expect(merged).toHaveLength(3);
     expect(merged[0].name).toBe('Hu Tao DB');
-    expect(merged[1].id).toBe('ganyu');
+    expect(merged.find((c) => c.id === 'nicole')?.weapon).toBe('Catalyst');
+    expect(merged.find((c) => c.id === 'ganyu')?.id).toBe('ganyu');
   });
 });

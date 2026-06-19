@@ -61,6 +61,19 @@ class ProfileResponse(BaseModel):
     created_at: datetime
 
 
+class SessionPermissionsResponse(BaseModel):
+    user_id: str
+    email: str | None = None
+    role: str = 'user'
+    is_privileged: bool = False
+    can_delete_any_notion_result: bool = False
+
+
+class AuthCountryResponse(BaseModel):
+    country_code: str | None = None
+    oauth_allowed: bool = True
+
+
 # --- Catalog (public) ---
 
 
@@ -237,7 +250,7 @@ class NotionSaveResultRequest(BaseModel):
     team_label: str = Field(min_length=1, max_length=500)
     total_dps: float = Field(gt=0)
     members: list[str] = Field(default_factory=list, max_length=4)
-    levels_label: str = Field(default='', max_length=200)
+    levels_label: str = Field(default='', max_length=500)
     display_name: str | None = Field(default=None, max_length=100)
 
     @field_validator('members')
@@ -255,6 +268,8 @@ class NotionResultItem(BaseModel):
     calculated_at: str | None = None
     levels_label: str = ''
     members: list[str] = Field(default_factory=list)
+    character_ids: list[str] = Field(default_factory=list)
+    notion_url: str | None = None
 
 
 class NotionResultsResponse(BaseModel):

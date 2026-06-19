@@ -7,9 +7,11 @@ import {
   CharacterCard,
   CharacterAvatar,
   ConstellationPanel,
+  CharacterTalentsPanel,
   CharacterPickerBar,
   ActionButton,
   InputField,
+  ElementalResBonusPicker,
   Tooltip,
   ConfirmModal,
   BarChart,
@@ -24,14 +26,21 @@ import {
   WeaponIcon,
   DualArtifactSetPicker,
   ArtifactSetIcon,
+  NotionResultsSection,
+  NotionSavePanel,
+  ResultSummaryStrip,
+  PlayerDisplayName,
 } from './components';
 import {
-  ARTIFACT_SUMMARY_FIELDS,
   FORMULAS,
   ELEMENT_COLORS,
   getSetBonuses,
   calculateMockDps,
   normalizeArtifacts,
+  getConfigTotalAtk,
+  applyConfigTotalAtk,
+  getElementalResBonusSlots,
+  patchElementalResBonusSlot,
 } from './mockData';
 import {
   findWeaponById,
@@ -49,15 +58,39 @@ import {
 import { CHARACTER_REGIONS } from './characters';
 import { useAppState } from './context';
 import { useCharacterConfigEditor } from './hooks/useCharacterConfigEditor';
-import { LOCAL_USER_ID } from './lib/displayName';
-import { fetchResultsUsers, fetchUserResults } from './services/resultsService';
+import {
+  canReachTalentLevel13,
+  formatTalentLevelsLabel,
+  getTalentConstellationBoosts,
+  getTalentLevelLimits,
+  normalizeStoredTalentLevel,
+} from './lib/talentLevelLimits';
+import { LOCAL_USER_ID, buildLocalResultsEntry } from './lib/displayName';
+import {
+  RESULTS_TAB_MINE,
+  RESULTS_TAB_PLAYERS,
+  resolveResultsTabFromHash,
+  resultsPageHref,
+  resultsTabHash,
+} from './lib/resultsTabs';
+import { canDeleteAnyNotionResult, canDeleteNotionResult } from './lib/permissions';
+import { fetchSessionPermissions } from './services/authSessionService';
+import {
+  fetchResultsUsers,
+  fetchUserResults,
+  filterMyResultsUsers,
+  shouldUseLocalResultsSummary,
+} from './services/resultsService';
+import { computeTeamDpsSummary, buildGetConfigFromPayload } from './lib/resultsSummary';
 import {
   buildNotionSavePayload,
   saveResultToNotion,
   fetchNotionResults,
   deleteNotionResult,
   getSupabaseAccessToken,
+  validateNotionSavePayload,
 } from './services/notionService';
+import { getSupabaseClient } from './lib/supabase';
 
 /* ═══════════════════════════════════════════
    1. Главная страница
@@ -65,7 +98,7 @@ import {
 const HOME_SHOWCASE_IDS = ['flins', 'varka', 'loen'];
 
 export function HomePage() {
-  const { findCharacter } = useAppState();
+  const { findCharacter, isAuthenticated } = useAppState();
   const showcase = HOME_SHOWCASE_IDS.map((id) => findCharacter(id)).filter(Boolean);
 
   return (
@@ -88,9 +121,15 @@ export function HomePage() {
             <Link to="/team" className="btn-pill-gold">
               Начать расчёт
             </Link>
-            <Link to="/results" className="btn-pill-ghost">
-              Результаты игроков
-            </Link>
+            {isAuthenticated ? (
+              <Link to={resultsPageHref(true)} className="btn-pill-ghost">
+                Результаты игроков
+              </Link>
+            ) : (
+              <Link to={resultsPageHref(false)} className="btn-pill-ghost">
+                Мои расчёты
+              </Link>
+            )}
           </div>
         </div>
       </section>
@@ -145,6 +184,7 @@ export function CharactersPage() {
   const { characters } = useAppState();
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
+  const [infoTab, setInfoTab] = useState('const');
 
   const filtered = useMemo(() => {
     if (!search.trim()) return characters;
@@ -186,7 +226,33 @@ export function CharactersPage() {
             onSelect={setSelectedId}
           />
           {selectedChar && (
-            <ConstellationPanel character={selectedChar} />
+            <>
+              <div className="character-info-tabs" role="tablist" aria-label="Раздел справочника">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={infoTab === 'const'}
+                  className={`character-info-tab ${infoTab === 'const' ? 'is-active' : ''}`}
+                  onClick={() => setInfoTab('const')}
+                >
+                  Созвездия
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={infoTab === 'talents'}
+                  className={`character-info-tab ${infoTab === 'talents' ? 'is-active' : ''}`}
+                  onClick={() => setInfoTab('talents')}
+                >
+                  Таланты
+                </button>
+              </div>
+              {infoTab === 'const' ? (
+                <ConstellationPanel character={selectedChar} />
+              ) : (
+                <CharacterTalentsPanel character={selectedChar} />
+              )}
+            </>
           )}
         </>
       ) : (
@@ -205,6 +271,7 @@ const TABS = [
   { key: 'weapon', label: 'Оружие' },
   { key: 'artifacts', label: 'Артефакты' },
   { key: 'const', label: 'Созвездия' },
+  { key: 'talents', label: 'Таланты' },
 ];
 
 export function CharacterSettingsPage() {
@@ -253,6 +320,11 @@ export function CharacterSettingsPage() {
   }
 
   const setBonus = getSetBonuses(config.artifacts, artifactSets);
+  const talentLimits = getTalentLevelLimits(character, config.constellation);
+  const talentBoosts = getTalentConstellationBoosts(character);
+  const talentLevelHint = canReachTalentLevel13(character)
+    ? `Данные genshin-db: +3 к талантам через созвездия. Обычная атака до 13${talentBoosts.auto ? ` (C${talentBoosts.auto}+)` : ''}, навык до 13${talentBoosts.skill ? ` (C${talentBoosts.skill}+)` : ''}, взрыв до 13${talentBoosts.burst ? ` (C${talentBoosts.burst}+)` : ''}. В игре реальный максимум — 13.`
+    : 'Максимум 10 — у персонажа нет созвездий с +3 к талантам.';
   const characterWeaponType = normalizeWeaponType(character.weapon);
   const compatibleWeaponCount = useMemo(
     () => getWeaponsForType(characterWeaponType).length,
@@ -268,13 +340,6 @@ export function CharacterSettingsPage() {
     () => [...new Set(setBonus.map((bonus) => bonus.setId).filter(Boolean))],
     [setBonus],
   );
-
-  const updateArtifactField = (field, value) => {
-    patchConfig((prev) => ({
-      ...prev,
-      artifacts: { ...prev.artifacts, [field]: value },
-    }));
-  };
 
   const updateArtifactSets = ({ set, set2 }) => {
     patchConfig((prev) => ({
@@ -292,6 +357,8 @@ export function CharacterSettingsPage() {
       setShowSaveModal(false);
     }
   };
+
+  const resBonusSlots = getElementalResBonusSlots(config.elementalResBonuses);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -325,25 +392,19 @@ export function CharacterSettingsPage() {
             onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-sm transition ${
               tab === t.key
-                ? 'border-b-2 border-genshin-gold text-white'
-                : 'text-white/75 hover:text-white'
+                ? 'settings-tab-active'
+                : 'settings-tab-inactive'
             }`}
           >
             {t.label}
             {t.key === 'weapon' ? (
-              <span className="ml-1.5 rounded-full bg-genshin-gold/90 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900">
-                {catalogTotal}
-              </span>
+              <span className="accent-badge">{catalogTotal}</span>
             ) : null}
             {t.key === 'artifacts' ? (
               <>
-                <span className="ml-1.5 rounded-full bg-genshin-gold/90 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900">
-                  {artifactCatalogTotal}
-                </span>
+                <span className="accent-badge">{artifactCatalogTotal}</span>
                 {config.artifacts.set2 ? (
-                  <span className="ml-1 rounded-full border border-genshin-gold/80 bg-genshin-gold/20 px-1.5 py-0.5 text-[10px] font-semibold text-genshin-gold">
-                    4+2
-                  </span>
+                  <span className="accent-badge">4+2</span>
                 ) : null}
               </>
             ) : null}
@@ -355,11 +416,58 @@ export function CharacterSettingsPage() {
       {tab === 'stats' && (
         <div className="grid gap-4 sm:grid-cols-2">
           <InputField label="Уровень" value={config.level} onChange={(v) => patchConfig({ level: v })} min={1} max={90} />
-          <InputField label="ATK (база)" value={config.atk.base} onChange={(v) => patchConfig((prev) => ({ ...prev, atk: { ...prev.atk, base: v } }))} min={0} />
-          <InputField label="ATK (бонус)" value={config.atk.bonus} onChange={(v) => patchConfig((prev) => ({ ...prev, atk: { ...prev.atk, bonus: v } }))} min={0} />
+          <InputField
+            label="ATK"
+            value={getConfigTotalAtk(config.atk)}
+            onChange={(v) => patchConfig((prev) => ({
+              ...prev,
+              atk: applyConfigTotalAtk(v),
+            }))}
+            min={0}
+          />
           <InputField label="HP" value={config.hp} onChange={(v) => patchConfig({ hp: v })} min={0} />
           <InputField label="Защита" value={config.def} onChange={(v) => patchConfig({ def: v })} min={0} />
           <InputField label="Мастерство стихий" value={config.em} onChange={(v) => patchConfig({ em: v })} min={0} />
+          {[0, 1].map((slotIndex) => {
+            const slot = resBonusSlots[slotIndex];
+            const otherElements = resBonusSlots
+              .filter((_, index) => index !== slotIndex && resBonusSlots[index]?.element)
+              .map((bonus) => bonus.element);
+
+            return (
+              <div key={slotIndex} className="contents">
+                <ElementalResBonusPicker
+                  label={`Бонус сопротивления ${slotIndex + 1}`}
+                  value={slot?.element ?? null}
+                  disabledElements={otherElements}
+                  onChange={(element) => patchConfig((prev) => ({
+                    ...prev,
+                    elementalResBonuses: patchElementalResBonusSlot(
+                      prev.elementalResBonuses,
+                      slotIndex,
+                      { element },
+                    ),
+                  }))}
+                />
+                {slot?.element ? (
+                  <InputField
+                    label={`Значение бонуса ${slotIndex + 1}`}
+                    value={slot.value}
+                    onChange={(v) => patchConfig((prev) => ({
+                      ...prev,
+                      elementalResBonuses: patchElementalResBonusSlot(
+                        prev.elementalResBonuses,
+                        slotIndex,
+                        { value: v },
+                      ),
+                    }))}
+                    min={0}
+                    suffix="%"
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -403,7 +511,9 @@ export function CharacterSettingsPage() {
               </p>
             ) : (
               <p className="mb-4 text-sm text-white">
-                Персонаж использует «{characterWeaponType}» · доступно {compatibleWeaponCount} из {catalogTotal}
+                Персонаж использует «{characterWeaponType}» · доступно{' '}
+                <span className="accent-count">{compatibleWeaponCount}</span> из{' '}
+                <span className="accent-count">{catalogTotal}</span>
               </p>
             )}
             {selectedWeapon ? (
@@ -423,6 +533,7 @@ export function CharacterSettingsPage() {
             ) : null}
             <WeaponPicker
               characterWeaponType={characterWeaponType}
+              characterId={character.id}
               value={config.equippedWeaponId}
               onChange={(weaponId) => patchConfig({ equippedWeaponId: weaponId })}
             />
@@ -439,22 +550,6 @@ export function CharacterSettingsPage() {
               set2={config.artifacts.set2}
               onChange={updateArtifactSets}
             />
-          </div>
-
-          <div className="glass-panel-sm p-4">
-            <h3 className="mb-3 text-sm font-medium text-white">Сводка статов</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {ARTIFACT_SUMMARY_FIELDS.map(({ key, label }) => (
-                <InputField
-                  key={key}
-                  label={label}
-                  value={config.artifacts[key]}
-                  onChange={(v) => updateArtifactField(key, v)}
-                  min={0}
-                  step={0.1}
-                />
-              ))}
-            </div>
           </div>
 
           {setBonus.length > 0 && (
@@ -486,8 +581,63 @@ export function CharacterSettingsPage() {
         <ConstellationPanel
           character={character}
           activeLevel={config.constellation}
-          onActiveLevelChange={(level) => patchConfig({ constellation: level })}
+          onActiveLevelChange={(level) => {
+            const limits = getTalentLevelLimits(character, level);
+            const levels = config.talentLevels || {};
+            patchConfig({
+              constellation: level,
+              talentLevels: {
+                auto: normalizeStoredTalentLevel(levels.auto, limits.auto),
+                skill: normalizeStoredTalentLevel(levels.skill, limits.skill),
+                burst: normalizeStoredTalentLevel(levels.burst, limits.burst),
+              },
+            });
+          }}
         />
+      )}
+
+      {tab === 'talents' && (
+        <div className="talent-tab">
+          <section className="talent-levels-card" aria-label="Уровни талантов">
+            <p className="talent-tab-hint">{talentLevelHint}</p>
+            <div className="talent-level-inputs">
+              <InputField
+                label={`Обычная атака${talentLimits.auto > 10 ? ` · до 13 (C${talentBoosts.auto}+)` : ''}`}
+                value={config.talentLevels?.auto ?? null}
+                allowEmpty
+                onChange={(v) => patchConfig((prev) => ({
+                  ...prev,
+                  talentLevels: { ...prev.talentLevels, auto: v },
+                }))}
+                min={1}
+                max={talentLimits.auto}
+              />
+              <InputField
+                label={`Элемент. навык${talentLimits.skill > 10 ? ` · до 13 (C${talentBoosts.skill}+)` : ''}`}
+                value={config.talentLevels?.skill ?? null}
+                allowEmpty
+                onChange={(v) => patchConfig((prev) => ({
+                  ...prev,
+                  talentLevels: { ...prev.talentLevels, skill: v },
+                }))}
+                min={1}
+                max={talentLimits.skill}
+              />
+              <InputField
+                label={`Взрыв стихии${talentLimits.burst > 10 ? ` · до 13 (C${talentBoosts.burst}+)` : ''}`}
+                value={config.talentLevels?.burst ?? null}
+                allowEmpty
+                onChange={(v) => patchConfig((prev) => ({
+                  ...prev,
+                  talentLevels: { ...prev.talentLevels, burst: v },
+                }))}
+                min={1}
+                max={talentLimits.burst}
+              />
+            </div>
+          </section>
+          <CharacterTalentsPanel character={character} showHeader={false} />
+        </div>
       )}
 
       {/* Кнопка сохранения */}
@@ -542,6 +692,7 @@ export function TeamPage() {
     userDataLoading,
     isAuthenticated,
     session,
+    syncTeamBeforeResults,
   } = useAppState();
   const [pickerSlot, setPickerSlot] = useState(null);
   const [pickerSearch, setPickerSearch] = useState('');
@@ -563,9 +714,14 @@ export function TeamPage() {
     })).filter((r) => r.characters.length > 0);
   }, [pickerCharacters]);
 
-  const handleCalculate = () => {
+  const handleCalculate = async () => {
     if (!team.some(Boolean)) return;
     if (isAuthenticated && session?.user?.id) {
+      try {
+        await syncTeamBeforeResults();
+      } catch {
+        return;
+      }
       navigate(`/results/${session.user.id}`);
       return;
     }
@@ -573,9 +729,9 @@ export function TeamPage() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="team-page mx-auto max-w-4xl px-4 py-8 text-white">
       <h1 className="page-heading mb-2">Сборка команды</h1>
-      <p className="mb-6 text-sm text-gray-400">
+      <p className="mb-6 text-sm text-white">
         Добавьте до 4 персонажей для расчёта DPS
         {!isAuthenticated && ' · Без входа данные сохраняются локально'}
       </p>
@@ -586,7 +742,7 @@ export function TeamPage() {
 
       {teamTotalAtk > 0 && (
         <div className="glass-panel-sm mb-6 flex items-center justify-between px-4 py-3">
-          <span className="text-sm text-gray-400">Суммарный ATK команды</span>
+          <span className="text-sm text-white">Суммарный ATK команды</span>
           <span className="text-xl font-bold text-white">{teamTotalAtk.toLocaleString()}</span>
         </div>
       )}
@@ -608,7 +764,7 @@ export function TeamPage() {
                       character={slot.char || { nameRu: slot.nameRu, nameEn: slot.nameEn }}
                       className="text-center"
                       primaryClassName="font-semibold text-white"
-                      secondaryClassName="text-xs text-white/60"
+                      secondaryClassName="text-xs text-white/85"
                     />
                     <span className="rounded bg-genshin-gold/20 px-2 py-0.5 text-xs font-bold text-white">
                       C{slot.constellation}
@@ -617,7 +773,7 @@ export function TeamPage() {
                   <span className={`mt-1 rounded px-2 py-0.5 text-xs text-white ${ELEMENT_COLORS[slot.element] || 'bg-gray-500'}`}>
                     {slot.element}
                   </span>
-                  <p className="mt-1 text-sm text-gray-400">
+                  <p className="mt-1 text-sm text-white">
                     ATK {slot.atk.toLocaleString()} · Lv. {slot.level}
                   </p>
                   <div className="mt-3 flex gap-3">
@@ -644,7 +800,7 @@ export function TeamPage() {
                     setPickerSearch('');
                     setPickerSlot(slotIdx);
                   }}
-                  className="flex flex-col items-center gap-2 text-gray-400 transition hover:text-white"
+                  className="flex flex-col items-center gap-2 text-white transition hover:text-white/90"
                 >
                   <span className="text-3xl">+</span>
                   <span>Добавить персонажа</span>
@@ -715,7 +871,7 @@ export function TeamPage() {
               setPickerSlot(null);
               setPickerSearch('');
             }}
-            className="mt-4 w-full rounded py-2 text-gray-300 hover:bg-white/10"
+            className="mt-4 w-full rounded py-2 text-white hover:bg-white/10"
           >
             Отмена
           </button>
@@ -734,6 +890,7 @@ function TeamResultsView({
   team,
   getConfig,
   findCharacter,
+  artifactSets,
   initialRotationTime = 20,
   showComparison = true,
   showNotionSave = false,
@@ -751,10 +908,10 @@ function TeamResultsView({
         const config = getConfig(id);
         const char = findCharacter(id);
         if (!config || !char) return null;
-        return calculateMockDps(config, char);
+        return calculateMockDps(config, char, { artifactSets });
       })
       .filter(Boolean);
-  }, [team, getConfig, findCharacter]);
+  }, [team, getConfig, findCharacter, artifactSets]);
 
   const totalDps = teamData.reduce((s, d) => s + d.totalDps, 0);
   const pieData = teamData.map((d) => ({ name: d.name, value: d.totalDps }));
@@ -772,8 +929,8 @@ function TeamResultsView({
         getConfig,
         findCharacter,
         totalDps,
-        displayName: profileDisplayName,
       });
+      validateNotionSavePayload(payload);
       await saveResultToNotion(payload, accessToken);
       setNotionSaveState('success');
     } catch (err) {
@@ -798,7 +955,7 @@ function TeamResultsView({
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-6">
-        <PageBackLink to="/results" label="К списку результатов" className="mb-3" />
+        <PageBackLink to="/results#notion-results" label="К списку результатов" className="mb-3" />
         <h1 className="page-heading">{title}</h1>
       </div>
 
@@ -853,6 +1010,37 @@ function TeamResultsView({
       </section>
 
       <section className="glass-panel mb-8 p-6">
+        <h2 className="mb-4 text-lg font-semibold">Учтённые параметры билда</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          {teamData.map((entry) => (
+            <div key={entry.characterId} className="glass-nested p-4 text-sm text-white/90">
+              <p className="mb-2 font-semibold text-white">{entry.name}</p>
+              <p>ATK: {entry.breakdown?.totalAtk?.toLocaleString() ?? '—'}</p>
+              <p>
+                CRIT: {entry.breakdown?.critRate ?? '—'}% / {entry.breakdown?.critDmg ?? '—'}%
+              </p>
+              <p>
+                Созвездие C{entry.constellation}
+                {' · '}
+                Таланты {formatTalentLevelsLabel(entry.breakdown?.sources?.talentLevels)}
+              </p>
+              <p>
+                Оружие: {entry.breakdown?.sources?.weapon?.label || 'не выбрано'}
+              </p>
+              <p>
+                Артефакты:{' '}
+                {entry.breakdown?.sources?.artifacts?.setBonuses?.length
+                  ? entry.breakdown.sources.artifacts.setBonuses
+                    .map((bonus) => `${bonus.set} (${bonus.pieces}pc)`)
+                    .join(' + ')
+                  : 'без сетов'}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="glass-panel mb-8 p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-lg font-semibold">
             <Tooltip text="Суммарный DPS" formula={FORMULAS.teamDps}>Итого команды</Tooltip>
@@ -879,33 +1067,11 @@ function TeamResultsView({
         </div>
 
         {showNotionSave && isAuthenticated && (
-          <div className="mt-6 border-t border-white/10 pt-4">
-            <ActionButton
-              variant="secondary"
-              onClick={handleSaveToNotion}
-              disabled={notionSaveState === 'loading'}
-            >
-              {notionSaveState === 'loading'
-                ? 'Сохранение...'
-                : notionSaveState === 'success'
-                  ? 'Сохранено в Notion'
-                  : 'Сохранить результат'}
-            </ActionButton>
-            {notionSaveState === 'loading' && (
-              <p className="mt-2 text-sm text-white/80">Результат сохраняется, подождите</p>
-            )}
-            {notionSaveState === 'success' && (
-              <p className="mt-2 text-sm text-white">
-                Сохранено в Notion.{' '}
-                <Link to="/results#notion-results" className="underline hover:text-white/80">
-                  Открыть список
-                </Link>
-              </p>
-            )}
-            {notionSaveError && (
-              <p className="mt-2 text-sm text-red-300">{notionSaveError}</p>
-            )}
-          </div>
+          <NotionSavePanel
+            onSave={handleSaveToNotion}
+            saveState={notionSaveState}
+            saveError={notionSaveError}
+          />
         )}
       </section>
 
@@ -971,8 +1137,21 @@ function TeamResultsView({
 }
 
 export function ResultsPage() {
-  const { isAuthenticated, session } = useAppState();
+  const {
+    isAuthenticated,
+    authLoading,
+    session,
+    profileDisplayName,
+    authPermissions,
+    team,
+    getConfig,
+    findCharacter,
+    artifactSets,
+  } = useAppState();
+  const hasMyTeam = team.some(Boolean);
   const [users, setUsers] = useState([]);
+  const [userSummaries, setUserSummaries] = useState({});
+  const [summariesLoading, setSummariesLoading] = useState(false);
   const [notionResults, setNotionResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -981,13 +1160,65 @@ export function ResultsPage() {
   const [notionError, setNotionError] = useState(null);
   const [notionRefreshing, setNotionRefreshing] = useState(false);
   const [deletingPageId, setDeletingPageId] = useState(null);
+  const [localPermissions, setLocalPermissions] = useState(null);
+  const [activeTab, setActiveTab] = useState(() => resolveResultsTabFromHash(
+    window.location.hash,
+    { isAuthenticated: false },
+  ));
+
+  const effectivePermissions = authPermissions ?? localPermissions;
+  const canDeleteAnyNotion = canDeleteAnyNotionResult(session, effectivePermissions);
+
+  const myUsers = useMemo(
+    () => filterMyResultsUsers(users, {
+      session,
+      isAuthenticated,
+      profileDisplayName,
+    }),
+    [users, session, isAuthenticated, profileDisplayName],
+  );
+
+  const mineDisplayUsers = useMemo(() => {
+    if (myUsers.length > 0) return myUsers;
+    if (!hasMyTeam) return [];
+    if (isAuthenticated && session?.user?.id) {
+      return [{
+        userId: session.user.id,
+        displayName: profileDisplayName || 'Вы',
+      }];
+    }
+    return [{ userId: LOCAL_USER_ID, displayName: 'Вы (локально)' }];
+  }, [myUsers, hasMyTeam, isAuthenticated, session?.user?.id, profileDisplayName]);
+
+  useEffect(() => {
+    if (!session?.user) {
+      setLocalPermissions(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadPermissions() {
+      const token = await getSupabaseAccessToken();
+      if (!token || cancelled) return;
+      const permissions = await fetchSessionPermissions(token);
+      if (!cancelled) setLocalPermissions(permissions);
+    }
+
+    loadPermissions();
+    return () => { cancelled = true; };
+  }, [session?.user?.id, session?.access_token]);
 
   const loadNotionResults = useCallback(async () => {
     setNotionRefreshing(true);
     setNotionError(null);
     setNotionNotice(null);
     try {
-      const notionData = await fetchNotionResults();
+      const accessToken = await getSupabaseAccessToken();
+      if (!accessToken) {
+        throw new Error('Войдите в аккаунт, чтобы просматривать расчёты игроков');
+      }
+      const notionData = await fetchNotionResults(accessToken);
       setNotionResults(notionData.items || []);
       if (notionData.unavailable && notionData.message) {
         setNotionNotice(notionData.message);
@@ -1009,12 +1240,22 @@ export function ResultsPage() {
       setNotionError(null);
       setNotionNotice(null);
       try {
+        const notionPromise = isAuthenticated
+          ? getSupabaseAccessToken()
+            .then((token) => (token ? fetchNotionResults(token) : { items: [] }))
+            .catch((err) => {
+              if (!cancelled) setNotionError(err.message || 'Notion недоступен');
+              return { items: [], unavailable: true, message: null };
+            })
+          : Promise.resolve({ items: [], unavailable: false, message: null });
+
         const [result, notionData] = await Promise.all([
-          fetchResultsUsers({ includeLocal: !isAuthenticated }),
-          fetchNotionResults().catch((err) => {
-            if (!cancelled) setNotionError(err.message || 'Notion недоступен');
-            return { items: [], unavailable: true, message: null };
-          }),
+          fetchResultsUsers({ includeLocal: !isAuthenticated }).catch((err) => ({
+            users: !isAuthenticated ? [buildLocalResultsEntry()] : [],
+            hint: err.message || 'Не удалось загрузить список пользователей',
+            rpcMissing: false,
+          })),
+          notionPromise,
         ]);
         if (!cancelled) {
           setUsers(result.users);
@@ -1038,12 +1279,73 @@ export function ResultsPage() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (window.location.hash !== '#notion-results') return undefined;
-    const timer = window.setTimeout(() => {
-      document.getElementById('notion-results')?.scrollIntoView({ behavior: 'smooth' });
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [loading]);
+    if (loading || !hasMyTeam) {
+      setUserSummaries({});
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadSummaries() {
+      setSummariesLoading(true);
+      try {
+        const entries = await Promise.all(mineDisplayUsers.map(async (user) => {
+          if (shouldUseLocalResultsSummary(user.userId, { session, isAuthenticated })) {
+            return [
+              user.userId,
+              computeTeamDpsSummary(team, getConfig, findCharacter, artifactSets),
+            ];
+          }
+
+          try {
+            const data = await fetchUserResults(user.userId);
+            if (!data?.team?.length) {
+              return [user.userId, null];
+            }
+            const getRemoteConfig = buildGetConfigFromPayload(data.configs);
+            return [
+              user.userId,
+              computeTeamDpsSummary(data.team, getRemoteConfig, findCharacter, artifactSets),
+            ];
+          } catch {
+            return [user.userId, null];
+          }
+        }));
+
+        if (!cancelled) {
+          setUserSummaries(Object.fromEntries(entries));
+        }
+      } finally {
+        if (!cancelled) setSummariesLoading(false);
+      }
+    }
+
+    loadSummaries();
+    return () => { cancelled = true; };
+  }, [mineDisplayUsers, loading, hasMyTeam, team, getConfig, findCharacter, artifactSets, session, isAuthenticated]);
+
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      setActiveTab(resolveResultsTabFromHash(window.location.hash, { isAuthenticated }));
+    };
+
+    syncTabFromHash();
+    window.addEventListener('hashchange', syncTabFromHash);
+    return () => window.removeEventListener('hashchange', syncTabFromHash);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated && window.location.hash === '#notion-results') {
+      window.history.replaceState(null, '', `${window.location.pathname}${resultsTabHash(RESULTS_TAB_MINE)}`);
+      setActiveTab(RESULTS_TAB_MINE);
+    }
+  }, [authLoading, isAuthenticated]);
+
+  const selectResultsTab = useCallback((tabId) => {
+    setActiveTab(tabId);
+    window.history.replaceState(null, '', `${window.location.pathname}${resultsTabHash(tabId)}`);
+  }, []);
 
   const handleDeleteNotionResult = async (pageId) => {
     setDeletingPageId(pageId);
@@ -1062,10 +1364,14 @@ export function ResultsPage() {
     }
   };
 
-  const canDeleteNotionItem = (item) => {
-    if (!session?.user?.id) return false;
-    return item.user_id === session.user.id;
-  };
+  const canDeleteNotionItem = useCallback(
+    (item) => canDeleteNotionResult(session, item, effectivePermissions),
+    [session, effectivePermissions],
+  );
+
+  const pageSubtitle = activeTab === RESULTS_TAB_PLAYERS
+    ? 'Расчёты всех игроков. Нажмите на строку, чтобы открыть.'
+    : 'Ваш сохранённый расчёт с этого аккаунта. Нажмите на строку, чтобы открыть подробный DPS.';
 
   if (loading) {
     return <LoadingState message="Загрузка результатов..." />;
@@ -1079,108 +1385,90 @@ export function ResultsPage() {
     <div className="mx-auto max-w-3xl px-4 py-8">
       <PageBackLink to="/team" label="К команде" className="mb-4" />
       <h1 className="page-heading mb-2">Результаты</h1>
-      <p className="mb-6 text-sm text-white/80">
-        Выберите игрока, чтобы посмотреть расчёт DPS его команды
+      <p className="mb-4 text-sm text-white/80">
+        {pageSubtitle}
       </p>
 
-      {hint && (
+      <div className="results-page-tabs" role="tablist" aria-label="Раздел результатов">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === RESULTS_TAB_MINE}
+          className={`results-page-tab ${activeTab === RESULTS_TAB_MINE ? 'is-active' : ''}`}
+          onClick={() => selectResultsTab(RESULTS_TAB_MINE)}
+        >
+          Мои расчёты
+        </button>
+        {isAuthenticated ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === RESULTS_TAB_PLAYERS}
+            className={`results-page-tab ${activeTab === RESULTS_TAB_PLAYERS ? 'is-active' : ''}`}
+            onClick={() => selectResultsTab(RESULTS_TAB_PLAYERS)}
+          >
+            Расчёт игроков
+            {notionResults.length > 0 ? (
+              <span className="ml-1.5 rounded-full bg-genshin-mint/20 px-2 py-0.5 text-xs text-genshin-mintbright">
+                {notionResults.length}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+      </div>
+
+      {hint && activeTab === RESULTS_TAB_MINE ? (
         <div className="mb-6 rounded border border-genshin-gold/40 bg-genshin-gold/10 px-4 py-3 text-sm text-white">
           {hint}
         </div>
-      )}
+      ) : null}
 
-      {users.length === 0 ? (
-        <div className="glass-panel p-6 text-center text-white/80">
-          Пока нет сохранённых расчётов. Соберите команду и нажмите «Рассчитать DPS».
-          <Link to="/team" className="mt-4 block text-white hover:underline">Перейти к команде</Link>
-        </div>
-      ) : (
-        <ul className="glass-panel divide-y divide-white/10">
-          {users.map(({ userId, displayName }) => {
-            const isSelf = session?.user?.id === userId;
-            return (
-              <li key={userId}>
-                <Link
-                  to={`/results/${userId}`}
-                  className="flex items-center justify-between px-5 py-4 transition hover:bg-white/20"
-                >
-                  <span className={`text-lg ${isSelf ? 'font-semibold text-white' : 'text-white'}`}>
-                    {displayName}
-                    {isSelf && <span className="ml-2 text-xs text-white/70">(вы)</span>}
-                  </span>
-                  <span className="text-white">→</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <section id="notion-results" className="mt-10 scroll-mt-24">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-white">Результаты в Notion</h2>
-          <button
-            type="button"
-            onClick={loadNotionResults}
-            disabled={notionRefreshing}
-            className="text-sm text-white underline transition hover:text-white/75 disabled:opacity-50"
-          >
-            {notionRefreshing ? 'Обновление...' : 'Обновить'}
-          </button>
-        </div>
-        <p className="mb-4 text-sm text-white/80">
-          Публичный список сохранённых расчётов. Сохранять могут только авторизованные пользователи.
-        </p>
-        {notionNotice && (
-          <div className="mb-4 rounded border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            {notionNotice}
-          </div>
-        )}
-        {notionError && (
-          <div className="mb-4 rounded border border-red-300/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-            {notionError}
-          </div>
-        )}
-        {notionResults.length === 0 ? (
-          <div className="glass-panel p-5 text-sm text-white/80">
-            Пока нет записей в Notion.
+      {activeTab === RESULTS_TAB_MINE ? (
+        !hasMyTeam ? (
+          <div className="glass-panel p-6 text-center text-white/80">
+            Пока нет сохранённых расчётов. Соберите команду и нажмите «Рассчитать DPS».
+            <Link to="/team" className="mt-4 block text-white hover:underline">Перейти к команде</Link>
           </div>
         ) : (
-          <ul className="glass-panel divide-y divide-white/10">
-            {notionResults.map((item) => (
-              <li key={item.page_id} className="px-5 py-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-white">{item.user_label || 'Игрок'}</p>
-                    <p className="text-sm text-white/90">{item.team_label}</p>
-                    <p className="mt-1 text-sm text-white/80">
-                      DPS: {Math.round(item.total_dps).toLocaleString()}
-                      {item.calculated_at ? ` · ${item.calculated_at}` : ''}
-                    </p>
-                    {item.members?.length > 0 && (
-                      <ul className="mt-2 space-y-1 text-xs text-white/75">
-                        {item.members.map((member) => (
-                          <li key={`${item.page_id}-${member}`}>{member}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  {canDeleteNotionItem(item) && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteNotionResult(item.page_id)}
-                      disabled={deletingPageId === item.page_id}
-                      className="text-xs text-red-300 hover:underline disabled:opacity-50"
-                    >
-                      {deletingPageId === item.page_id ? 'Удаление...' : 'Удалить'}
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
+          <ul className="result-strip-list glass-panel p-2 md:p-3">
+            {mineDisplayUsers.map(({ userId, displayName }) => {
+              const isSelf = session?.user?.id === userId;
+              const summary = userSummaries[userId];
+              const teamEntries = (summary?.teamIds || []).map((characterId) => ({
+                key: characterId,
+                name: findCharacter(characterId)?.nameRu || characterId,
+                character: findCharacter(characterId),
+              }));
+
+              return (
+                <li key={userId}>
+                  <ResultSummaryStrip
+                    href={`/results/${userId}`}
+                    userName={displayName}
+                    isSelf={isSelf}
+                    teamEntries={teamEntries}
+                    totalDps={summariesLoading && !summary ? null : summary?.totalDps ?? null}
+                  />
+                </li>
+              );
+            })}
           </ul>
-        )}
-      </section>
+        )
+      ) : (
+        <NotionResultsSection
+          results={notionResults}
+          notice={notionNotice}
+          error={notionError}
+          refreshing={notionRefreshing}
+          onRefresh={loadNotionResults}
+          deletingPageId={deletingPageId}
+          onDelete={handleDeleteNotionResult}
+          canDeleteItem={canDeleteNotionItem}
+          canDeleteAny={canDeleteAnyNotion}
+          isAuthenticated={isAuthenticated}
+          embedded
+        />
+      )}
     </div>
   );
 }
@@ -1193,6 +1481,7 @@ export function UserResultsPage() {
     findCharacter,
     isAuthenticated,
     session,
+    artifactSets,
   } = useAppState();
   const [remoteData, setRemoteData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1255,7 +1544,13 @@ export function UserResultsPage() {
     ? 'Ваш расчёт (локально)'
     : isOwnView
       ? 'Ваш расчёт'
-      : `Расчёт: ${remoteData?.displayName || 'Игрок'}`;
+      : (
+        <>
+          Расчёт:
+          {' '}
+          <PlayerDisplayName name={remoteData?.displayName} />
+        </>
+      );
 
   if (loading) {
     return <LoadingState message="Загрузка расчёта..." />;
@@ -1264,7 +1559,7 @@ export function UserResultsPage() {
   if (error) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-8">
-        <PageBackLink to="/results" label="К списку результатов" className="mb-4" />
+        <PageBackLink to="/results#notion-results" label="К списку результатов" className="mb-4" />
         <ErrorState message={error} />
       </div>
     );
@@ -1276,9 +1571,75 @@ export function UserResultsPage() {
       team={resolvedTeam}
       getConfig={resolvedGetConfig}
       findCharacter={findCharacter}
+      artifactSets={artifactSets}
       initialRotationTime={remoteData?.rotationSeconds ?? 20}
       showComparison={isLocalView || isOwnView}
       showNotionSave={isLocalView || isOwnView}
     />
   );
+}
+
+export function AuthCallbackPage() {
+  const navigate = useNavigate();
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function finishAuth() {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        if (!cancelled) setError('Supabase не настроен');
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const authError = params.get('error_description') || params.get('error');
+      if (authError) {
+        if (!cancelled) {
+          setError(decodeURIComponent(authError.replace(/\+/g, ' ')));
+        }
+        return;
+      }
+
+      const tokenHash = params.get('token_hash');
+      const otpType = params.get('type') || 'email';
+      if (tokenHash) {
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: otpType,
+        });
+        if (verifyError && !cancelled) {
+          setError(verifyError.message);
+          return;
+        }
+        if (!cancelled) {
+          navigate('/team', { replace: true });
+        }
+        return;
+      }
+
+      const { error: sessionError } = await supabase.auth.getSession();
+      if (sessionError && !cancelled) {
+        setError(sessionError.message);
+        return;
+      }
+
+      if (!cancelled) navigate('/team', { replace: true });
+    }
+
+    finishAuth();
+    return () => { cancelled = true; };
+  }, [navigate]);
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16">
+        <ErrorState message={error} />
+        <Link to="/" className="mt-4 block text-center text-white hover:underline">На главную</Link>
+      </div>
+    );
+  }
+
+  return <LoadingState message="Завершение входа..." />;
 }

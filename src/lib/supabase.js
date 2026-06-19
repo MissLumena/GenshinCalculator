@@ -24,7 +24,12 @@ export function getSupabaseClient() {
     return null;
   }
   if (!client) {
-    client = createClient(supabaseUrl, supabaseAnonKey);
+    client = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+      },
+    });
   }
   return client;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import { highlightConstellationText, ConstellationPanel, getConstellationShapeImgClassName } from './components';
+import { highlightConstellationText, ConstellationPanel, ConstellationShapeFallback, TravelerDuoConstellationPortrait, getConstellationShapeImgClassName } from './components';
 import { findCharacterById } from './characters';
 
 vi.mock('./services/constellationService', () => ({
@@ -43,10 +43,60 @@ describe('ConstellationPanel', () => {
     expect(html).toContain('constellation-panel');
     expect(html).toContain('constellation-badge');
     expect(html).toContain('Созвездие');
+    expect(html).toContain('data-constellation-element="anemo"');
   });
 
-  it('uses bright constellation class for Ororon', () => {
-    expect(getConstellationShapeImgClassName('ororon')).toContain('constellation-shape-img--bright');
-    expect(getConstellationShapeImgClassName('venti')).toBe('constellation-shape-img');
+  it('applies pyro theme for Pyro characters', () => {
+    const character = findCharacterById('hu-tao');
+    const html = renderToString(
+      <ConstellationPanel character={character} />,
+    );
+    expect(html).toContain('data-constellation-element="pyro"');
+  });
+
+  it('applies enhanced glow for all elements', () => {
+    expect(getConstellationShapeImgClassName('venti', 'Anemo')).toContain('constellation-shape-img--enhanced');
+    expect(getConstellationShapeImgClassName('hu-tao', 'Pyro')).toContain('constellation-shape-img--enhanced');
+    expect(getConstellationShapeImgClassName('raiden-shogun', 'Electro')).toContain('constellation-shape-img--enhanced');
+  });
+
+  it('uses extra-bright class for Ororon', () => {
+    expect(getConstellationShapeImgClassName('ororon', 'Electro')).toContain('constellation-shape-img--extra-bright');
+    expect(getConstellationShapeImgClassName('ororon', 'Electro')).toContain('constellation-shape-img--enhanced');
+  });
+
+  it('renders traveler element tabs', () => {
+    const traveler = findCharacterById('traveler');
+    const html = renderToString(
+      <ConstellationPanel character={traveler} />,
+    );
+    expect(html).toContain('constellation-element-tabs');
+    expect(html).toContain('constellation-element-tab--anemo');
+    expect(html).toContain('constellation-element-tab--hydro');
+    expect(html).toContain('constellation-element-tab--pyro');
+    expect(html).toContain('Анемо');
+    expect(html).toContain('Пиро');
+  });
+});
+
+describe('TravelerDuoConstellationPortrait', () => {
+  it('renders Aether and Lumine together', () => {
+    const html = renderToString(<TravelerDuoConstellationPortrait />);
+    expect(html).toContain('constellation-character--traveler-duo');
+    expect(html).toContain('alt="Эттер"');
+    expect(html).toContain('alt="Люмин"');
+    expect(html).toContain('PlayerBoy');
+    expect(html).toContain('PlayerGirl');
+  });
+});
+
+describe('ConstellationShapeFallback', () => {
+  it('renders decorative SVG with constellation name', () => {
+    const html = renderToString(
+      <ConstellationShapeFallback constellationName="Turris Venefica" activeLevel={3} />,
+    );
+    expect(html).toContain('constellation-shape-fallback');
+    expect(html).toContain('Turris Venefica');
+    expect(html).toContain('constellation-shape-fallback__star');
   });
 });

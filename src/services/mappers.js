@@ -4,6 +4,7 @@
 import { ARTIFACT_SLOTS, slotsToSimplified, simplifiedToSlots, getDefaultArtifacts, normalizeArtifacts } from '../mockData';
 import {
   stripWeaponFromArtifactsSummary,
+  mergeConfigExtrasIntoArtifactsSummary,
   mergeWeaponIntoArtifactsSummary,
   normalizeWeaponType,
 } from '../weapons';
@@ -63,9 +64,12 @@ export function mergeArtifactSets(dbSets, localSets) {
 
 export function dbRowToConfig(row, artifacts = []) {
   if (row.artifacts_summary && Object.keys(row.artifacts_summary).length > 0) {
-    const { artifacts: artifactFields, equippedWeaponId } = stripWeaponFromArtifactsSummary(
-      row.artifacts_summary,
-    );
+    const {
+      artifacts: artifactFields,
+      equippedWeaponId,
+      elementalResBonuses,
+      talentLevels,
+    } = stripWeaponFromArtifactsSummary(row.artifacts_summary);
     return {
       id: row.id,
       characterId: row.game_character_id,
@@ -80,6 +84,8 @@ export function dbRowToConfig(row, artifacts = []) {
       constellation: row.constellation,
       artifacts: normalizeArtifacts(artifactFields),
       equippedWeaponId,
+      elementalResBonuses,
+      talentLevels,
     };
   }
 
@@ -106,6 +112,8 @@ export function dbRowToConfig(row, artifacts = []) {
     constellation: row.constellation,
     artifacts: slotsToSimplified(artifactMap),
     equippedWeaponId: null,
+    elementalResBonuses: null,
+    talentLevels: null,
   };
 }
 
@@ -123,10 +131,11 @@ export function configToDbRow(config, userId) {
     crit_rate: config.critRate,
     crit_dmg: config.critDmg,
     constellation: config.constellation,
-    artifacts_summary: mergeWeaponIntoArtifactsSummary(
-      config.artifacts,
-      config.equippedWeaponId,
-    ),
+    artifacts_summary: mergeConfigExtrasIntoArtifactsSummary(config.artifacts, {
+      equippedWeaponId: config.equippedWeaponId,
+      elementalResBonuses: config.elementalResBonuses,
+      talentLevels: config.talentLevels,
+    }),
   };
 }
 
@@ -141,14 +150,27 @@ export function configToArtifactRows(userCharacterId, artifacts) {
   }));
 }
 
-/** Объединяет локальный справочник с данными из Supabase (приоритет у БД). */
+/** Объединяет локальный справочник с данными из Supabase (имена из БД, тип оружия/элемент из репозитория). */
 export function mergeCharacters(dbCharacters, localCharacters) {
   const dbMap = new Map(dbCharacters.map((c) => [c.id, c]));
   const seen = new Set();
   const merged = [];
 
   for (const local of localCharacters) {
-    merged.push(dbMap.get(local.id) || local);
+    const db = dbMap.get(local.id);
+    merged.push(
+      db
+        ? {
+            ...db,
+            weapon: local.weapon,
+            element: local.element,
+            region: local.region,
+            rarity: local.rarity,
+            iconId: local.iconId,
+            nameRu: local.nameRu ?? db.nameRu,
+          }
+        : local,
+    );
     seen.add(local.id);
   }
 

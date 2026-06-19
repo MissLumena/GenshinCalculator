@@ -47,8 +47,8 @@ const RAW = [
   ['dahlia', 'Dahlia', 'Далия', 'mondstadt', 'Hydro', 'Sword', 4],
   ['durin', 'Durin', 'Дурин', 'mondstadt', 'Pyro', 'Sword', 5],
   ['varka', 'Varka', 'Варка', 'mondstadt', 'Anemo', 'Claymore', 5],
-  ['pulonia', 'Pulonia', 'Прюн', 'mondstadt', 'Hydro', 'Catalyst', 4],
-  ['loen', 'Loen', 'Лоэн', 'mondstadt', 'Cryo', 'Bow', 5],
+  ['pulonia', 'Pulonia', 'Прюн', 'mondstadt', 'Anemo', 'Catalyst', 4],
+  ['loen', 'Loen', 'Лоэн', 'mondstadt', 'Cryo', 'Polearm', 5],
   // Ли Юэ
   ['baizhu', 'Baizhu', 'Бай Чжу', 'liyue', 'Dendro', 'Catalyst', 5],
   ['beidou', 'Beidou', 'Бэй Доу', 'liyue', 'Electro', 'Claymore', 4],
@@ -126,17 +126,17 @@ const RAW = [
   ['ineffa', 'Ineffa', 'Ineffa', 'nodkrai', 'Electro', 'Polearm', 5],
   ['lauma', 'Lauma', 'Lauma', 'nodkrai', 'Dendro', 'Catalyst', 5],
   ['aino', 'Aino', 'Ayno', 'nodkrai', 'Hydro', 'Bow', 4],
-  ['flins', 'Flins', 'Флинс', 'nodkrai', 'Electro', 'Sword', 5],
+  ['flins', 'Flins', 'Флинс', 'nodkrai', 'Electro', 'Polearm', 5],
   ['nefer', 'Nefer', 'Nefer', 'nodkrai', 'Dendro', 'Catalyst', 5],
-  ['yagoda', 'Yagoda', 'Ягода', 'nodkrai', 'Hydro', 'Catalyst', 4],
-  ['columbina', 'Columbina', 'Kolombina', 'nodkrai', 'Hydro', 'Catalyst', 5],
-  ['illuga', 'Illuga', 'Illugi', 'nodkrai', 'Geo', 'Claymore', 5],
+  ['yagoda', 'Yagoda', 'Ягода', 'nodkrai', 'Anemo', 'Catalyst', 4],
+  ['columbina', 'Columbina', 'Коломбина', 'nodkrai', 'Hydro', 'Catalyst', 5],
+  ['illuga', 'Illuga', 'Иллуги', 'nodkrai', 'Geo', 'Polearm', 4],
   ['linnea', 'Linnea', 'Linnea', 'nodkrai', 'Anemo', 'Bow', 5],
   // Snezhnaya
   ['tartaglia', 'Tartaglia', 'Tartaglia', 'snezhnaya', 'Hydro', 'Bow', 5],
   ['arlecchino', 'Arlecchino', 'Arlecchino', 'snezhnaya', 'Pyro', 'Polearm', 5],
   // Celestia
-  ['nicole', 'Nicole', 'Николь', 'celestia', 'Electro', 'Sword', 5],
+  ['nicole', 'Nicole', 'Николь', 'celestia', 'Electro', 'Catalyst', 5],
 ];
 
 function buildCharacter([id, name, nameRu, region, element, weapon, rarity, iconId]) {

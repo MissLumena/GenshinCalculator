@@ -4,17 +4,19 @@
 
 :root {
   --glass-fill: rgba(255, 255, 255, 0.28);
-  --glass-fill-strong: rgba(255, 255, 255, 0.38);
+  --glass-fill-strong: rgba(255, 255, 255, 0.42);
   --glass-fill-soft: rgba(255, 255, 255, 0.18);
   --glass-fill-hover: rgba(255, 255, 255, 0.42);
   --glass-border: rgba(255, 255, 255, 0.58);
   --glass-border-strong: rgba(255, 255, 255, 0.72);
-  --glass-text: rgba(255, 255, 255, 0.95);
-  --glass-text-muted: rgba(255, 255, 255, 0.72);
+  --glass-text: rgba(255, 255, 255, 0.98);
+  --glass-text-muted: rgba(255, 255, 255, 0.82);
   --btn-green: rgba(152, 220, 175, 0.92);
   --btn-green-hover: rgba(178, 235, 196, 0.96);
   --btn-green-border: rgba(190, 240, 205, 0.78);
   --btn-green-text: #1f4a34;
+  --sunset-sky-height: 60%;
+  --sunset-horizon-y: 90%;
 }
 
 @layer utilities {
@@ -38,12 +40,36 @@ body {
   min-height: 100vh;
   font-family: 'Source Sans 3', system-ui, sans-serif;
   color: var(--glass-text);
-  background-color: #87b8d8;
-  background-image: url('/background/windrise.png');
+  background-color: #4a6280;
+  background-image: url('/background/windrise-1920.jpg');
   background-position: center center;
   background-size: cover;
   background-repeat: no-repeat;
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+
+@supports (background-image: image-set(url('/background/windrise-1920.webp') type('image/webp'))) {
+  body {
+    background-image: image-set(
+      url('/background/windrise-1920.webp') type('image/webp'),
+      url('/background/windrise-1920.jpg') type('image/jpeg')
+    );
+  }
+}
+
+@media (-webkit-min-device-pixel-ratio: 1.75), (min-resolution: 168dpi) {
+  body {
+    background-image: url('/background/windrise-2560.jpg');
+  }
+
+  @supports (background-image: image-set(url('/background/windrise-2560.webp') type('image/webp'))) {
+    body {
+      background-image: image-set(
+        url('/background/windrise-2560.webp') type('image/webp'),
+        url('/background/windrise-2560.jpg') type('image/jpeg')
+      );
+    }
+  }
 }
 
 .font-display {
@@ -52,25 +78,76 @@ body {
   text-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
 }
 
-body::before {
-  content: '';
+#evening-dim {
   position: fixed;
   inset: 0;
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.12) 0%,
-    rgba(186, 230, 253, 0.08) 35%,
-    rgba(255, 255, 255, 0.06) 65%,
-    rgba(148, 163, 184, 0.1) 100%
-  );
   pointer-events: none;
   z-index: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 12, 28, 0.12) 0%,
+    rgba(6, 10, 24, 0.18) 42%,
+    rgba(4, 8, 20, 0.3) 100%
+  );
+}
+
+#sunset-scene {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--sunset-sky-height);
+  pointer-events: none;
+  z-index: 0;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      ellipse 115% 38% at 58% var(--sunset-horizon-y),
+      rgba(255, 148, 82, 0.32) 0%,
+      rgba(228, 96, 58, 0.14) 46%,
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(14, 20, 48, 0.62) 0%,
+      rgba(38, 34, 72, 0.54) 16%,
+      rgba(72, 42, 82, 0.46) 34%,
+      rgba(138, 58, 72, 0.4) 52%,
+      rgba(208, 92, 58, 0.32) 72%,
+      rgba(242, 132, 68, 0.2) 88%,
+      transparent 100%
+    );
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 70%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 70%, transparent 100%);
+}
+
+#sunset-scene::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 26% 15% at 20% 24%, rgba(255, 188, 118, 0.72) 0%, rgba(255, 128, 82, 0.34) 44%, transparent 74%),
+    radial-gradient(ellipse 20% 12% at 12% 18%, rgba(255, 158, 98, 0.58) 0%, transparent 68%),
+    radial-gradient(ellipse 18% 11% at 32% 15%, rgba(255, 205, 145, 0.52) 0%, transparent 70%),
+    radial-gradient(ellipse 22% 13% at 26% 32%, rgba(255, 165, 105, 0.48) 0%, transparent 72%),
+    radial-gradient(ellipse 24% 14% at 78% 13%, rgba(255, 175, 110, 0.68) 0%, rgba(255, 108, 72, 0.3) 46%, transparent 76%),
+    radial-gradient(ellipse 16% 10% at 88% 19%, rgba(255, 198, 138, 0.55) 0%, transparent 70%),
+    radial-gradient(ellipse 18% 11% at 64% 21%, rgba(255, 182, 118, 0.5) 0%, transparent 72%);
+  mix-blend-mode: soft-light;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 52%, transparent 82%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 52%, transparent 82%);
 }
 
 #root {
   position: relative;
   z-index: 1;
   min-height: 100vh;
+}
+
+@media (min-width: 768px) {
+  body {
+    background-attachment: fixed;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -138,6 +215,53 @@ body::before {
     border-color: var(--glass-border-strong);
   }
 
+  .res-bonus-picker {
+    @apply relative;
+  }
+
+  .res-bonus-picker__trigger {
+    @apply rounded-2xl text-sm backdrop-blur-md transition focus:outline-none focus:ring-2 focus:ring-white/20;
+    background-color: var(--glass-fill-soft);
+    border: 1px solid var(--glass-border);
+  }
+
+  .res-bonus-picker__trigger.is-selected {
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .res-bonus-picker__trigger.is-selected:hover {
+    background-color: var(--btn-green-hover);
+  }
+
+  .res-bonus-picker__menu {
+    @apply absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-2xl p-1 shadow-glass-lg backdrop-blur-3xl;
+    background-color: var(--glass-fill-strong);
+    border: 1px solid var(--glass-border-strong);
+  }
+
+  .res-bonus-picker__option {
+    @apply w-full rounded-xl px-3 py-2 text-left text-sm text-white transition disabled:cursor-not-allowed disabled:opacity-40;
+    background-color: transparent;
+    border: 1px solid transparent;
+  }
+
+  .res-bonus-picker__option:hover:not(:disabled):not(.is-selected) {
+    background-color: var(--glass-fill-soft);
+    border-color: var(--glass-border);
+  }
+
+  .res-bonus-picker__option.is-selected {
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .res-bonus-picker__option.is-selected:hover:not(:disabled) {
+    background-color: var(--btn-green-hover);
+  }
+
   .glass-hero-card {
     @apply relative overflow-hidden rounded-[2rem] shadow-glass-lg backdrop-blur-2xl;
     background-color: var(--glass-fill-soft);
@@ -148,6 +272,183 @@ body::before {
     @apply inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white backdrop-blur-lg;
     background-color: var(--glass-fill);
     border: 1px solid var(--glass-border);
+  }
+
+  .notion-brand {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold shadow-glass;
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(228, 228, 228, 0.88));
+    color: #2f3437;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+  }
+
+  .notion-panel {
+    @apply glass-panel p-5 md:p-7;
+  }
+
+  .notion-panel-header {
+    @apply mb-5 flex flex-wrap items-start justify-between gap-4;
+  }
+
+  .result-strip-list {
+    @apply flex list-none flex-col gap-2 p-0;
+  }
+
+  .result-strip {
+    @apply flex min-h-[3.25rem] flex-wrap items-center gap-2 rounded-2xl px-3 py-2 transition md:flex-nowrap md:gap-3 md:px-4;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+  }
+
+  a.result-strip:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--glass-border-strong);
+  }
+
+  .result-strip-clickable {
+    cursor: pointer;
+  }
+
+  .result-strip-team {
+    @apply flex min-w-0 flex-1 list-none items-center gap-1.5 overflow-x-auto p-0;
+  }
+
+  .result-strip-avatar {
+    @apply shrink-0 rounded-full;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+  }
+
+  .result-strip-dps-label {
+    @apply block text-[10px] uppercase tracking-[0.12em] text-white/50;
+  }
+
+  .result-strip-dps-value {
+    @apply font-display text-base font-semibold leading-tight text-white md:text-lg;
+  }
+
+  .result-strip-trailing {
+    @apply shrink-0;
+  }
+
+  .result-strip-row {
+    @apply flex items-stretch gap-2;
+  }
+
+  .result-strip-row .notion-delete-btn {
+    @apply self-center shrink-0;
+  }
+
+  .result-strip-row .result-strip {
+    @apply flex-1;
+  }
+
+  .notion-results-grid {
+    @apply grid list-none gap-4 p-0 sm:grid-cols-2;
+  }
+
+  .notion-card {
+    @apply glass-panel-sm flex h-full flex-col gap-3 p-4 transition;
+  }
+
+  .notion-card:hover {
+    background-color: rgba(255, 255, 255, 0.22);
+    border-color: var(--glass-border-strong);
+  }
+
+  .notion-user-avatar {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white;
+    background: linear-gradient(145deg, rgba(152, 220, 175, 0.55), rgba(88, 148, 118, 0.45));
+    border: 1px solid rgba(190, 240, 205, 0.55);
+  }
+
+  .notion-dps-block {
+    @apply rounded-2xl px-3 py-2.5;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+  }
+
+  .notion-dps-label {
+    @apply text-[11px] uppercase tracking-[0.14em] text-white/55;
+  }
+
+  .notion-dps-value {
+    @apply font-display mt-0.5 text-2xl font-semibold leading-none text-white;
+  }
+
+  .notion-member-list {
+    @apply flex list-none flex-col gap-2 p-0;
+  }
+
+  .notion-team-avatars {
+    @apply flex list-none flex-wrap gap-2 p-0;
+  }
+
+  .notion-team-avatar-item {
+    @apply rounded-full;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22);
+  }
+
+  .notion-member-row {
+    @apply flex items-center gap-2 rounded-2xl px-2.5 py-2;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+  }
+
+  .notion-member-avatar {
+    @apply shrink-0;
+  }
+
+  .notion-member-text {
+    @apply min-w-0 text-[11px] leading-snug text-white/90;
+  }
+
+  .notion-member-chip {
+    @apply rounded-full px-2.5 py-1 text-[11px] leading-snug text-white/85;
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.26);
+  }
+
+  .notion-delete-btn {
+    @apply shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-red-100 transition;
+    background-color: rgba(127, 29, 29, 0.55);
+    border: 1px solid rgba(248, 113, 113, 0.55);
+  }
+
+  .notion-delete-btn:hover:not(:disabled) {
+    background-color: rgba(248, 113, 113, 0.18);
+    color: #fff;
+  }
+
+  .notion-delete-btn:disabled {
+    @apply opacity-50;
+  }
+
+  .notion-alert {
+    @apply mb-4 rounded-2xl px-4 py-3 text-sm;
+    border: 1px solid transparent;
+  }
+
+  .notion-alert-warning {
+    color: #fde68a;
+    background-color: rgba(245, 158, 11, 0.12);
+    border-color: rgba(251, 191, 36, 0.35);
+  }
+
+  .notion-alert-error {
+    color: #fecaca;
+    background-color: rgba(239, 68, 68, 0.12);
+    border-color: rgba(248, 113, 113, 0.35);
+  }
+
+  .notion-empty {
+    @apply rounded-2xl px-4 py-8 text-center;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px dashed rgba(255, 255, 255, 0.28);
+  }
+
+  .notion-save-panel {
+    @apply mt-6 rounded-2xl p-4 md:p-5;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.28);
   }
 
   .btn-pill-ghost {
@@ -180,6 +481,47 @@ body::before {
 
   .btn-pill-gold:hover {
     background-color: var(--btn-green-hover);
+  }
+
+  .accent-badge {
+    @apply ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold;
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .accent-badge-md {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide;
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .accent-badge-sm {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .accent-filter-active {
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .accent-count {
+    color: var(--btn-green-hover);
+    font-weight: 700;
+  }
+
+  .settings-tab-active {
+    @apply border-b-2 text-white;
+    border-bottom-color: var(--btn-green);
+  }
+
+  .settings-tab-inactive {
+    @apply text-white/80 hover:text-white;
   }
 
   .nav-link-pill {
@@ -215,6 +557,16 @@ body::before {
 
   .page-subheading {
     @apply text-sm text-white/75 md:text-base;
+  }
+
+  .team-page {
+    color: #fff;
+  }
+
+  .team-page .glass-panel,
+  .team-page .glass-panel-sm,
+  .team-page .glass-modal {
+    color: #fff;
   }
 
   .select-field {
@@ -292,28 +644,309 @@ body::before {
     border: 1px solid rgba(255, 255, 255, 0.45);
   }
 
-  .constellation-panel {
+  .constellation-panel,
+  .talent-panel {
     @apply relative overflow-hidden rounded-[1.75rem] p-5 shadow-glass-lg backdrop-blur-2xl md:p-6;
     background-color: var(--glass-fill);
     border: 1px solid var(--glass-border-strong);
+    --const-node-bg: linear-gradient(145deg, #4f7cff 0%, #2f4ac9 100%);
+    --const-node-border: rgba(255, 255, 255, 0.35);
+    --const-node-active-border: rgba(191, 219, 254, 0.95);
+    --const-node-glow: rgba(96, 165, 250, 0.55);
+    --const-badge-bg: linear-gradient(120deg, #5b7cfa 0%, #3b5bdb 35%, #7aa2ff 50%, #2f4ac9 75%, #5b7cfa 100%);
+    --const-badge-shadow: rgba(47, 74, 201, 0.45);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(147, 197, 253, 1);
+    --const-highlight: #93c5fd;
+    --const-panel-glow: rgba(96, 165, 250, 0.12);
+    --const-panel-accent: rgba(59, 91, 219, 0.18);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(240, 248, 255, 0.95);
+    --const-shape-bright-mid: rgba(147, 197, 253, 0.95);
+    --const-shape-bright-outer: rgba(96, 165, 250, 1);
+    --const-shape-bright-far: rgba(59, 91, 219, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(186, 230, 253, 0.16);
+    --const-art-backdrop-outer: rgba(96, 165, 250, 0.08);
+  }
+
+  .constellation-panel::before,
+  .talent-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      radial-gradient(ellipse 80% 55% at 15% 0%, var(--const-panel-accent) 0%, transparent 62%),
+      radial-gradient(ellipse 70% 50% at 95% 100%, var(--const-panel-glow) 0%, transparent 58%);
+    opacity: 0.95;
+  }
+
+  .constellation-panel::after {
+    content: '';
+    position: absolute;
+    inset: -40% -20%;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(
+      115deg,
+      transparent 35%,
+      rgba(255, 255, 255, 0.07) 48%,
+      transparent 62%
+    );
+    animation: constellation-panel-shimmer 7s ease-in-out infinite;
+    opacity: 0.6;
+  }
+
+  @keyframes constellation-panel-shimmer {
+    0%, 100% { transform: translateX(-8%) rotate(0deg); opacity: 0.35; }
+    50% { transform: translateX(8%) rotate(0deg); opacity: 0.75; }
+  }
+
+  @keyframes constellation-badge-shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='pyro'] {
+    --const-node-bg: linear-gradient(145deg, #ff6b4a 0%, #c41e3a 55%, #ff9f43 100%);
+    --const-node-border: rgba(255, 200, 170, 0.45);
+    --const-node-active-border: rgba(255, 220, 180, 0.95);
+    --const-node-glow: rgba(255, 107, 74, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #ff4757 0%, #ff6b35 25%, #ffd166 50%, #ff6348 75%, #e55039 100%);
+    --const-badge-shadow: rgba(255, 90, 60, 0.5);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(255, 180, 100, 1);
+    --const-highlight: #ffb199;
+    --const-panel-glow: rgba(255, 100, 70, 0.16);
+    --const-panel-accent: rgba(255, 80, 50, 0.22);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(255, 235, 220, 0.95);
+    --const-shape-bright-mid: rgba(255, 140, 90, 0.95);
+    --const-shape-bright-outer: rgba(255, 90, 60, 1);
+    --const-shape-bright-far: rgba(196, 30, 58, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(255, 180, 120, 0.16);
+    --const-art-backdrop-outer: rgba(255, 107, 74, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='hydro'] {
+    --const-node-bg: linear-gradient(145deg, #38bdf8 0%, #2563eb 55%, #67e8f9 100%);
+    --const-node-border: rgba(186, 230, 253, 0.45);
+    --const-node-active-border: rgba(224, 242, 254, 0.95);
+    --const-node-glow: rgba(56, 189, 248, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #0ea5e9 0%, #38bdf8 30%, #7dd3fc 50%, #0284c7 75%, #22d3ee 100%);
+    --const-badge-shadow: rgba(14, 165, 233, 0.5);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(103, 232, 249, 1);
+    --const-highlight: #7dd3fc;
+    --const-panel-glow: rgba(56, 189, 248, 0.16);
+    --const-panel-accent: rgba(37, 99, 235, 0.22);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(224, 242, 254, 0.95);
+    --const-shape-bright-mid: rgba(103, 232, 249, 0.95);
+    --const-shape-bright-outer: rgba(56, 189, 248, 1);
+    --const-shape-bright-far: rgba(37, 99, 235, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(125, 211, 252, 0.16);
+    --const-art-backdrop-outer: rgba(56, 189, 248, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='electro'] {
+    --const-node-bg: linear-gradient(145deg, #c084fc 0%, #7c3aed 55%, #e879f9 100%);
+    --const-node-border: rgba(233, 213, 255, 0.45);
+    --const-node-active-border: rgba(243, 232, 255, 0.95);
+    --const-node-glow: rgba(192, 132, 252, 0.8);
+    --const-badge-bg: linear-gradient(120deg, #a855f7 0%, #c084fc 28%, #f0abfc 50%, #7c3aed 72%, #d946ef 100%);
+    --const-badge-shadow: rgba(168, 85, 247, 0.5);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(240, 171, 252, 1);
+    --const-highlight: #f5d0fe;
+    --const-panel-glow: rgba(168, 85, 247, 0.16);
+    --const-panel-accent: rgba(124, 58, 237, 0.22);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(255, 240, 255, 0.95);
+    --const-shape-bright-mid: rgba(244, 114, 182, 0.95);
+    --const-shape-bright-outer: rgba(216, 132, 252, 1);
+    --const-shape-bright-far: rgba(167, 139, 250, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(240, 171, 252, 0.16);
+    --const-art-backdrop-outer: rgba(192, 132, 252, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='cryo'] {
+    --const-node-bg: linear-gradient(145deg, #a5f3fc 0%, #0891b2 55%, #e0f2fe 100%);
+    --const-node-border: rgba(207, 250, 254, 0.5);
+    --const-node-active-border: rgba(236, 254, 255, 0.95);
+    --const-node-glow: rgba(103, 232, 249, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #22d3ee 0%, #67e8f9 30%, #f0fdff 50%, #0891b2 75%, #06b6d4 100%);
+    --const-badge-shadow: rgba(6, 182, 212, 0.45);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(165, 243, 252, 1);
+    --const-highlight: #a5f3fc;
+    --const-panel-glow: rgba(103, 232, 249, 0.14);
+    --const-panel-accent: rgba(8, 145, 178, 0.2);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(236, 254, 255, 0.95);
+    --const-shape-bright-mid: rgba(165, 243, 252, 0.95);
+    --const-shape-bright-outer: rgba(103, 232, 249, 1);
+    --const-shape-bright-far: rgba(8, 145, 178, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(165, 243, 252, 0.16);
+    --const-art-backdrop-outer: rgba(103, 232, 249, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='anemo'] {
+    --const-node-bg: linear-gradient(145deg, #5eead4 0%, #0d9488 55%, #99f6e4 100%);
+    --const-node-border: rgba(153, 246, 228, 0.45);
+    --const-node-active-border: rgba(204, 251, 241, 0.95);
+    --const-node-glow: rgba(45, 212, 191, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #14b8a6 0%, #5eead4 30%, #ccfbf1 50%, #0d9488 75%, #2dd4bf 100%);
+    --const-badge-shadow: rgba(20, 184, 166, 0.45);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(153, 246, 228, 1);
+    --const-highlight: #99f6e4;
+    --const-panel-glow: rgba(45, 212, 191, 0.14);
+    --const-panel-accent: rgba(13, 148, 136, 0.2);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(240, 253, 250, 0.95);
+    --const-shape-bright-mid: rgba(153, 246, 228, 0.95);
+    --const-shape-bright-outer: rgba(45, 212, 191, 1);
+    --const-shape-bright-far: rgba(13, 148, 136, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(153, 246, 228, 0.16);
+    --const-art-backdrop-outer: rgba(45, 212, 191, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='geo'] {
+    --const-node-bg: linear-gradient(145deg, #fcd34d 0%, #b45309 55%, #fde68a 100%);
+    --const-node-border: rgba(253, 230, 138, 0.45);
+    --const-node-active-border: rgba(254, 243, 199, 0.95);
+    --const-node-glow: rgba(251, 191, 36, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #f59e0b 0%, #fcd34d 28%, #fff7ed 50%, #d97706 72%, #fbbf24 100%);
+    --const-badge-shadow: rgba(245, 158, 11, 0.5);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(252, 211, 77, 1);
+    --const-highlight: #fde68a;
+    --const-panel-glow: rgba(251, 191, 36, 0.14);
+    --const-panel-accent: rgba(180, 83, 9, 0.2);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(255, 251, 235, 0.95);
+    --const-shape-bright-mid: rgba(252, 211, 77, 0.95);
+    --const-shape-bright-outer: rgba(251, 191, 36, 1);
+    --const-shape-bright-far: rgba(180, 83, 9, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(252, 211, 77, 0.16);
+    --const-art-backdrop-outer: rgba(251, 191, 36, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='dendro'] {
+    --const-node-bg: linear-gradient(145deg, #86efac 0%, #15803d 55%, #bbf7d0 100%);
+    --const-node-border: rgba(187, 247, 208, 0.45);
+    --const-node-active-border: rgba(220, 252, 231, 0.95);
+    --const-node-glow: rgba(74, 222, 128, 0.75);
+    --const-badge-bg: linear-gradient(120deg, #22c55e 0%, #86efac 30%, #ecfccb 50%, #15803d 75%, #4ade80 100%);
+    --const-badge-shadow: rgba(34, 197, 94, 0.45);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(134, 239, 172, 1);
+    --const-highlight: #bbf7d0;
+    --const-panel-glow: rgba(74, 222, 128, 0.14);
+    --const-panel-accent: rgba(21, 128, 61, 0.2);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(240, 253, 244, 0.95);
+    --const-shape-bright-mid: rgba(134, 239, 172, 0.95);
+    --const-shape-bright-outer: rgba(74, 222, 128, 1);
+    --const-shape-bright-far: rgba(21, 128, 61, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(134, 239, 172, 0.16);
+    --const-art-backdrop-outer: rgba(74, 222, 128, 0.08);
+  }
+
+  :is(.constellation-panel, .talent-panel)[data-constellation-element='physical'] {
+    --const-node-bg: linear-gradient(145deg, #cbd5e1 0%, #64748b 55%, #e2e8f0 100%);
+    --const-node-border: rgba(226, 232, 240, 0.45);
+    --const-node-active-border: rgba(248, 250, 252, 0.95);
+    --const-node-glow: rgba(148, 163, 184, 0.65);
+    --const-badge-bg: linear-gradient(120deg, #94a3b8 0%, #cbd5e1 35%, #f8fafc 50%, #64748b 75%, #94a3b8 100%);
+    --const-badge-shadow: rgba(100, 116, 139, 0.45);
+    --const-shape-glow: rgba(255, 255, 255, 0.95);
+    --const-shape-glow-soft: rgba(203, 213, 225, 1);
+    --const-highlight: #e2e8f0;
+    --const-panel-glow: rgba(148, 163, 184, 0.12);
+    --const-panel-accent: rgba(100, 116, 139, 0.18);
+    --const-shape-bright-core: rgba(255, 255, 255, 1);
+    --const-shape-bright-inner: rgba(248, 250, 252, 0.95);
+    --const-shape-bright-mid: rgba(203, 213, 225, 0.95);
+    --const-shape-bright-outer: rgba(148, 163, 184, 1);
+    --const-shape-bright-far: rgba(100, 116, 139, 0.85);
+    --const-art-backdrop-core: rgba(255, 255, 255, 0.28);
+    --const-art-backdrop-mid: rgba(203, 213, 225, 0.16);
+    --const-art-backdrop-outer: rgba(148, 163, 184, 0.08);
   }
 
   .constellation-header {
-    @apply mb-5 flex flex-col items-center gap-2 text-center;
+    @apply relative z-[1] mb-5 flex flex-col items-center gap-2 text-center;
   }
 
+  .constellation-element-tabs {
+    @apply flex flex-wrap items-center justify-center gap-2;
+  }
+
+  .constellation-element-tab {
+    @apply rounded-full border px-3.5 py-1.5 text-xs font-semibold transition md:px-4 md:text-sm;
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(15, 23, 42, 0.35);
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .constellation-element-tab.is-active {
+    border-color: var(--const-node-active-border);
+    background: color-mix(in srgb, var(--const-panel-accent) 70%, rgba(15, 23, 42, 0.55));
+    color: #fff;
+    box-shadow: 0 0 14px var(--const-node-glow);
+  }
+
+  .constellation-element-tab--anemo.is-active { --const-node-active-border: #74c69d; --const-node-glow: rgba(116, 198, 157, 0.45); --const-panel-accent: rgba(116, 198, 157, 0.25); }
+  .constellation-element-tab--geo.is-active { --const-node-active-border: #f4d35e; --const-node-glow: rgba(244, 211, 94, 0.45); --const-panel-accent: rgba(244, 211, 94, 0.25); }
+  .constellation-element-tab--electro.is-active { --const-node-active-border: #b185db; --const-node-glow: rgba(177, 133, 219, 0.45); --const-panel-accent: rgba(177, 133, 219, 0.25); }
+  .constellation-element-tab--dendro.is-active { --const-node-active-border: #a7c957; --const-node-glow: rgba(167, 201, 87, 0.45); --const-panel-accent: rgba(167, 201, 87, 0.25); }
+  .constellation-element-tab--hydro.is-active { --const-node-active-border: #4cc9f0; --const-node-glow: rgba(76, 201, 240, 0.45); --const-panel-accent: rgba(76, 201, 240, 0.25); }
+  .constellation-element-tab--pyro.is-active { --const-node-active-border: #ff6b6b; --const-node-glow: rgba(255, 107, 107, 0.45); --const-panel-accent: rgba(255, 107, 107, 0.25); }
+
   .constellation-badge {
-    @apply block w-fit rounded-full px-10 py-2 text-sm font-semibold tracking-wide text-white md:text-base;
-    background: linear-gradient(180deg, #3b5bdb 0%, #2f4ac9 100%);
-    box-shadow: 0 4px 14px rgba(47, 74, 201, 0.35);
+    @apply relative block w-fit overflow-hidden rounded-full px-10 py-2 text-sm font-semibold tracking-wide text-white md:text-base;
+    background: var(--const-badge-bg);
+    background-size: 220% 220%;
+    animation: constellation-badge-shimmer 5s ease-in-out infinite;
+    box-shadow: 0 4px 18px var(--const-badge-shadow);
+  }
+
+  .constellation-badge::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.28) 50%,
+      transparent 70%
+    );
+    transform: translateX(-120%);
+    animation: constellation-badge-glint 4.5s ease-in-out infinite;
+  }
+
+  @keyframes constellation-badge-glint {
+    0%, 100% { transform: translateX(-120%); }
+    45%, 55% { transform: translateX(120%); }
   }
 
   .constellation-subtitle {
-    @apply text-sm text-white/75 md:text-base;
+    @apply relative z-[1] text-sm text-white/75 md:text-base;
   }
 
   .constellation-body {
-    @apply grid min-h-[480px] gap-0 md:min-h-[560px];
+    @apply relative z-[1] grid min-h-[480px] gap-0 md:min-h-[560px];
     grid-template-columns: minmax(0, 44%) minmax(0, 56%);
   }
 
@@ -323,6 +956,16 @@ body::before {
 
   .constellation-portrait-img {
     @apply h-full max-h-[520px] w-auto max-w-full object-contain object-bottom md:max-h-[600px];
+    filter: drop-shadow(0 10px 28px rgba(15, 23, 42, 0.35));
+    background: transparent;
+  }
+
+  .constellation-character--traveler-duo {
+    @apply flex items-end justify-center gap-1 md:gap-2;
+  }
+
+  .constellation-portrait-img--traveler-duo {
+    @apply h-full max-h-[520px] w-auto max-w-[46%] object-contain object-bottom md:max-h-[600px];
     filter: drop-shadow(0 10px 28px rgba(15, 23, 42, 0.35));
     background: transparent;
   }
@@ -337,21 +980,103 @@ body::before {
   }
 
   .constellation-art-wrap {
-    @apply flex h-full w-full items-center justify-center pr-14 md:pr-16;
+    @apply relative flex h-full w-full items-center justify-center pr-14 md:pr-16;
+  }
+
+  .constellation-panel[data-constellation-element] .constellation-art-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 8% 12% 8% 4%;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 50% 50%,
+      var(--const-art-backdrop-core) 0%,
+      var(--const-art-backdrop-mid) 38%,
+      var(--const-art-backdrop-outer) 58%,
+      transparent 74%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .constellation-panel[data-constellation-element] .constellation-shape-img {
+    position: relative;
+    z-index: 1;
   }
 
   .constellation-shape-img {
     @apply max-h-[min(360px,100%)] w-full max-w-full object-contain;
-    filter: drop-shadow(0 0 20px rgba(147, 197, 253, 0.85)) drop-shadow(0 0 40px rgba(96, 165, 250, 0.5));
+    filter:
+      drop-shadow(0 0 20px var(--const-shape-glow))
+      drop-shadow(0 0 40px var(--const-shape-glow-soft));
   }
 
-  .constellation-shape-img--bright {
+  .constellation-shape-img--enhanced {
     filter:
-      brightness(1.7)
-      contrast(1.25)
-      saturate(1.15)
-      drop-shadow(0 0 24px rgba(192, 132, 252, 0.95))
-      drop-shadow(0 0 48px rgba(167, 139, 250, 0.6));
+      brightness(1.9)
+      contrast(1.45)
+      saturate(1.18)
+      drop-shadow(0 0 8px var(--const-shape-bright-core))
+      drop-shadow(0 0 18px var(--const-shape-bright-inner))
+      drop-shadow(0 0 32px var(--const-shape-bright-mid))
+      drop-shadow(0 0 52px var(--const-shape-bright-outer))
+      drop-shadow(0 0 72px var(--const-shape-bright-far));
+  }
+
+  .constellation-shape-img--extra-bright {
+    filter:
+      brightness(2.05)
+      contrast(1.52)
+      saturate(1.22)
+      drop-shadow(0 0 10px var(--const-shape-bright-core))
+      drop-shadow(0 0 22px var(--const-shape-bright-inner))
+      drop-shadow(0 0 38px var(--const-shape-bright-mid))
+      drop-shadow(0 0 58px var(--const-shape-bright-outer))
+      drop-shadow(0 0 80px var(--const-shape-bright-far));
+  }
+
+  .constellation-shape-fallback {
+    @apply relative z-[1] h-auto w-full max-w-[min(300px,100%)];
+    max-height: min(360px, 100%);
+    overflow: visible;
+  }
+
+  .constellation-shape-fallback__edge {
+    stroke: var(--const-shape-glow);
+    stroke-width: 1.35;
+    stroke-opacity: 0.5;
+    stroke-linecap: round;
+  }
+
+  .constellation-shape-fallback__star {
+    fill: var(--const-highlight);
+    filter: drop-shadow(0 0 8px var(--const-shape-glow));
+  }
+
+  .constellation-shape-fallback__halo {
+    fill: var(--const-shape-glow-soft);
+    opacity: 0.55;
+    animation: constellation-fallback-pulse 2.6s ease-in-out infinite;
+  }
+
+  .constellation-shape-fallback__node.is-active .constellation-shape-fallback__star {
+    filter:
+      drop-shadow(0 0 10px var(--const-shape-bright-core))
+      drop-shadow(0 0 18px var(--const-shape-bright-inner));
+  }
+
+  .constellation-shape-fallback__label {
+    fill: rgba(255, 255, 255, 0.88);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    filter: drop-shadow(0 0 10px var(--const-shape-glow-soft));
+  }
+
+  @keyframes constellation-fallback-pulse {
+    0%, 100% { opacity: 0.4; transform-origin: center; }
+    50% { opacity: 0.75; }
   }
 
   .constellation-nodes {
@@ -359,24 +1084,56 @@ body::before {
   }
 
   .constellation-node {
-    @apply flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 p-1 text-[10px] font-semibold transition md:h-[3.25rem] md:w-[3.25rem];
-    background: linear-gradient(180deg, rgba(59, 91, 219, 0.95) 0%, rgba(47, 74, 201, 0.95) 100%);
-    border-color: rgba(255, 255, 255, 0.35);
-    color: rgba(255, 255, 255, 0.9);
+    @apply relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 p-1 text-[10px] font-semibold transition md:h-[3.25rem] md:w-[3.25rem];
+    background: var(--const-node-bg);
+    background-size: 180% 180%;
+    border-color: var(--const-node-border);
+    color: rgba(255, 255, 255, 0.95);
+  }
+
+  .constellation-node::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: linear-gradient(
+      130deg,
+      transparent 35%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 65%
+    );
+    opacity: 0;
+    transition: opacity 0.25s ease;
   }
 
   .constellation-node-icon {
-    @apply h-full w-full object-contain;
+    @apply relative z-[1] h-full w-full object-contain;
   }
 
   .constellation-node-active {
-    border-color: rgba(191, 219, 254, 0.95);
-    box-shadow: 0 0 16px rgba(147, 197, 253, 0.75), 0 0 28px rgba(96, 165, 250, 0.45);
+    border-color: var(--const-node-active-border);
+    box-shadow: 0 0 16px var(--const-node-glow), 0 0 28px color-mix(in srgb, var(--const-node-glow) 65%, transparent);
     transform: scale(1.06);
+    animation: constellation-node-pulse 2.8s ease-in-out infinite;
+  }
+
+  .constellation-node-active::before {
+    opacity: 0.85;
+    animation: constellation-node-glint 3s ease-in-out infinite;
+  }
+
+  @keyframes constellation-node-pulse {
+    0%, 100% { box-shadow: 0 0 14px var(--const-node-glow), 0 0 24px color-mix(in srgb, var(--const-node-glow) 55%, transparent); }
+    50% { box-shadow: 0 0 22px var(--const-node-glow), 0 0 36px color-mix(in srgb, var(--const-node-glow) 75%, transparent); }
+  }
+
+  @keyframes constellation-node-glint {
+    0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.45; }
+    50% { transform: rotate(8deg) scale(1.05); opacity: 0.95; }
   }
 
   .constellation-detail {
-    @apply shrink-0 border-t border-white/20 pt-4 md:pt-5;
+    @apply relative z-[1] shrink-0 border-t border-white/20 pt-4 md:pt-5;
   }
 
   .constellation-detail-title {
@@ -388,8 +1145,9 @@ body::before {
   }
 
   .constellation-highlight {
-    color: #93c5fd;
+    color: var(--const-highlight);
     font-weight: 600;
+    text-shadow: 0 0 12px color-mix(in srgb, var(--const-highlight) 45%, transparent);
   }
 
   @media (max-width: 767px) {
@@ -418,5 +1176,168 @@ body::before {
     .constellation-art-wrap {
       @apply pr-0;
     }
+  }
+
+  .talent-panel {
+    color: #fff;
+  }
+
+  .talent-panel .constellation-header {
+    @apply relative z-[1] mb-4 flex flex-col items-stretch gap-3 text-left sm:items-center sm:text-center;
+  }
+
+  .talent-panel::after {
+    display: none;
+  }
+
+  .talent-tab {
+    @apply flex flex-col gap-5;
+  }
+
+  .talent-levels-card {
+    @apply relative z-[1] rounded-2xl border p-4 md:p-5;
+    background-color: var(--glass-fill-strong);
+    border-color: var(--glass-border-strong);
+    box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  }
+
+  .talent-level-inputs {
+    @apply grid grid-cols-1 gap-4 md:grid-cols-3;
+  }
+
+  .talent-list {
+    @apply relative z-[1] flex flex-col gap-4;
+  }
+
+  .talent-card-head {
+    @apply mb-3 flex items-start gap-3;
+  }
+
+  .talent-icon {
+    @apply h-14 w-14 shrink-0 rounded-xl border border-white/25 bg-black/20 object-cover;
+  }
+
+  .talent-icon-fallback {
+    @apply flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-white/25 bg-white/10 text-sm font-semibold text-white;
+  }
+
+  .talent-card-meta {
+    @apply min-w-0 flex-1;
+  }
+
+  .talent-tab-hint {
+    @apply mb-4 text-sm leading-relaxed text-white;
+    text-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  }
+
+  .talent-level-inputs label > span:first-child {
+    @apply min-h-[2.5rem] text-sm font-semibold leading-snug text-white;
+    text-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  }
+
+  .talent-tab .glass-input {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.22);
+    border-color: var(--glass-border-strong);
+    text-shadow: 0 1px 2px rgba(15, 23, 42, 0.35);
+  }
+
+  .talent-tab .glass-input::placeholder {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .talent-card {
+    @apply relative z-[1] rounded-2xl border p-4;
+    background-color: var(--glass-fill-strong);
+    border-color: var(--glass-border-strong);
+    box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  }
+
+  .talent-type {
+    @apply text-xs font-semibold uppercase tracking-wide text-white/90;
+    text-shadow: 0 1px 2px rgba(15, 23, 42, 0.4);
+  }
+
+  .talent-name {
+    @apply text-lg font-semibold text-white;
+    text-shadow: 0 1px 4px rgba(15, 23, 42, 0.5);
+  }
+
+  .talent-description {
+    @apply max-h-48 overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-white;
+    text-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  }
+
+  .talent-panel .constellation-detail-text {
+    @apply max-h-48 text-white;
+    text-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  }
+
+  .talent-panel .constellation-highlight {
+    color: #fff7ed;
+    font-weight: 700;
+    text-shadow: 0 0 10px rgba(255, 180, 100, 0.55), 0 1px 3px rgba(15, 23, 42, 0.55);
+  }
+
+  .talent-level-inputs input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .talent-level-inputs input[type='number']::-webkit-outer-spin-button,
+  .talent-level-inputs input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .character-info-tabs {
+    @apply relative z-10 mb-4 flex flex-wrap gap-2;
+  }
+
+  .character-info-tab {
+    @apply rounded-full px-4 py-2 text-sm font-semibold shadow-glass backdrop-blur-sm transition;
+    background-color: rgba(152, 220, 175, 0.28);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .character-info-tab:hover {
+    background-color: rgba(152, 220, 175, 0.48);
+  }
+
+  .character-info-tab.is-active {
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .character-info-tab.is-active:hover {
+    background-color: var(--btn-green-hover);
+  }
+
+  .results-page-tabs {
+    @apply mb-6 flex flex-wrap gap-2;
+  }
+
+  .results-page-tab {
+    @apply rounded-full px-4 py-2 text-sm font-semibold shadow-glass backdrop-blur-sm transition;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.88);
+  }
+
+  .results-page-tab:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: #fff;
+  }
+
+  .results-page-tab.is-active {
+    background-color: var(--btn-green);
+    border: 1px solid var(--btn-green-border);
+    color: var(--btn-green-text);
+  }
+
+  .results-page-tab.is-active:hover {
+    background-color: var(--btn-green-hover);
   }
 }

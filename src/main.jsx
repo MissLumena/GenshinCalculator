@@ -36,14 +36,9 @@ window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason;
   showBootError(
     reason?.message || String(reason),
-    reason?.stack || '',
   );
 });
 
-import('./bootstrap.jsx').catch((error) => {
-  showBootError(
-    error?.message || String(error),
-    error?.stack || '',
-  );
-  console.error(error);
+import('./bootstrap.jsx').catch(() => {
+  showBootError('Не удалось загрузить приложение');
 });

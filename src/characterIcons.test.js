@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getCharacterIconUrls,
   getCharacterSplashUrls,
   getCharacterConstellationPortraitUrls,
+  getTravelerDuoPortraitSets,
 } from './characterIcons';
 import { findCharacterById } from './characters';
+
+describe('getCharacterIconUrls', () => {
+  it('returns empty list when character has no id', () => {
+    expect(getCharacterIconUrls({ nameRu: 'Неизвестный' })).toEqual([]);
+  });
+});
 
 describe('getCharacterSplashUrls', () => {
   it('returns enka gacha splash for Flins', () => {
@@ -51,5 +59,14 @@ describe('getCharacterConstellationPortraitUrls', () => {
     const urls = getCharacterConstellationPortraitUrls(character);
 
     expect(urls[0]).toBe('https://enka.network/ui/UI_Gacha_AvatarImg_Kazuha.png');
+  });
+
+  it('returns empty portrait list for traveler and provides duo sets', () => {
+    const character = findCharacterById('traveler');
+    expect(getCharacterConstellationPortraitUrls(character)).toEqual([]);
+
+    const duo = getTravelerDuoPortraitSets();
+    expect(duo.aether[0]).toContain('PlayerBoy');
+    expect(duo.lumine[0]).toContain('PlayerGirl');
   });
 });

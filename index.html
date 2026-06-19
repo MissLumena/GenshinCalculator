@@ -3,29 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preload" as="image" href="/background/windrise-1920.webp" type="image/webp" />
+    <link rel="preload" as="image" href="/background/windrise-1920.jpg" type="image/jpeg" />
     <style>
       html, body { margin: 0; min-height: 100%; }
       body {
-        background-color: #87b8d8;
-        background-image: url('/background/windrise.png');
+        background-color: #4a6280;
+        background-image: url('/background/windrise-1920.jpg');
         background-position: center;
         background-size: cover;
-        background-attachment: fixed;
+        background-attachment: scroll;
         color: #fff;
         font-family: system-ui, sans-serif;
       }
-      body::before {
-        content: '';
+      #evening-dim {
         position: fixed;
         inset: 0;
-        background: linear-gradient(
-          165deg,
-          rgba(255, 255, 255, 0.12) 0%,
-          rgba(186, 230, 253, 0.08) 35%,
-          rgba(255, 255, 255, 0.06) 100%
-        );
         pointer-events: none;
         z-index: 0;
+        background: linear-gradient(
+          180deg,
+          rgba(8, 12, 28, 0.12) 0%,
+          rgba(6, 10, 24, 0.18) 42%,
+          rgba(4, 8, 20, 0.3) 100%
+        );
+      }
+      #sunset-scene {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 60%;
+        pointer-events: none;
+        z-index: 0;
+        background: linear-gradient(
+          180deg,
+          rgba(14, 20, 48, 0.62) 0%,
+          rgba(38, 34, 72, 0.54) 16%,
+          rgba(72, 42, 82, 0.46) 34%,
+          rgba(138, 58, 72, 0.4) 52%,
+          rgba(208, 92, 58, 0.32) 72%,
+          rgba(242, 132, 68, 0.2) 88%,
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 70%, transparent 100%);
+        mask-image: linear-gradient(180deg, #000 0%, #000 70%, transparent 100%);
       }
       #root { min-height: 100vh; position: relative; z-index: 1; }
       #root .boot-loader {
@@ -44,6 +66,8 @@
     <title>Genshin Calculator</title>
   </head>
   <body class="text-white">
+    <div id="evening-dim" aria-hidden="true"></div>
+    <div id="sunset-scene" aria-hidden="true"></div>
     <div id="root"><p class="boot-loader">Загрузка приложения…</p></div>
     <script>
       (function () {

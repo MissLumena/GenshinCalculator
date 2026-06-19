@@ -62,9 +62,7 @@ def _map_notion_error(error: NotionApiError) -> HTTPException:
     return HTTPException(status_code=error.status_code, detail=detail)
 
 
-def _user_label(user: AuthUser, payload: NotionSaveResultRequest) -> str:
-    if payload.display_name and payload.display_name.strip():
-        return payload.display_name.strip()
+def _user_label(user: AuthUser, _payload: NotionSaveResultRequest) -> str:
     if user.email:
         return user.email
     return user.id
@@ -89,6 +87,7 @@ def save_result(
 
 @router.get('/results', response_model=NotionResultsResponse)
 def list_results(
+    _user: AuthenticatedUser,
     service: NotionService = Depends(get_notion_service),
     settings: Settings = Depends(get_settings),
 ) -> NotionResultsResponse:
@@ -132,12 +131,13 @@ def delete_result(
     page_id: str,
     user: AuthenticatedUser,
     service: NotionService = Depends(get_notion_service),
+    settings: Settings = Depends(get_settings),
 ) -> MessageResponse:
     try:
         service.delete_result(
             page_id,
-            requester_id=user.id,
-            requester_role=user.role,
+            requester_email=user.email,
+            settings=settings,
         )
     except NotionApiError as exc:
         raise _map_notion_error(exc) from exc

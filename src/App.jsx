@@ -8,7 +8,7 @@ import {
   useMemo,
   useRef,
 } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Header } from './components';
 import { AppContext } from './context';
 import {
@@ -18,6 +18,7 @@ import {
   TeamPage,
   ResultsPage,
   UserResultsPage,
+  AuthCallbackPage,
 } from './pages';
 
 import { getDefaultConfig, normalizeArtifacts, ARTIFACT_SETS as LOCAL_ARTIFACT_SETS } from './mockData';
@@ -33,11 +34,14 @@ import {
   signOut,
   onAuthStateChange,
   getInitialSession,
+  signInWithOAuth,
 } from './services/userDataService';
 import {
   buildLocalTeamComposition,
 } from './services/teamService';
 import { updateMyDisplayName } from './services/resultsService';
+import { getSupabaseAccessToken } from './services/notionService';
+import { fetchSessionPermissions } from './services/authSessionService';
 import { formatDisplayName } from './lib/displayName';
 import { ensureCatalogForConfig } from './services/catalogSyncService';
 
@@ -63,6 +67,7 @@ function saveLocalState(savedConfigs, team) {
 }
 
 export default function App() {
+  const navigate = useNavigate();
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(null);
   const [characters, setCharacters] = useState(LOCAL_CHARACTERS);
@@ -82,9 +87,11 @@ export default function App() {
   const [teamComposition, setTeamComposition] = useState([null, null, null, null]);
   const [teamTotalAtk, setTeamTotalAtk] = useState(0);
   const [profileDisplayName, setProfileDisplayName] = useState(null);
+  const [authPermissions, setAuthPermissions] = useState(null);
 
   /** Отменяет устаревший fetchUserData, если пользователь уже изменил команду. */
   const userDataLoadSeqRef = useRef(0);
+  const hadAuthenticatedSessionRef = useRef(false);
 
   const isAuthenticated = Boolean(session?.user);
 
@@ -201,6 +208,52 @@ export default function App() {
   useEffect(() => {
     if (authLoading) return;
 
+    if (session?.user) {
+      hadAuthenticatedSessionRef.current = true;
+      return;
+    }
+
+    if (hadAuthenticatedSessionRef.current) {
+      hadAuthenticatedSessionRef.current = false;
+      navigate('/', { replace: true });
+    }
+  }, [session?.user, authLoading, navigate]);
+
+  useEffect(() => {
+    if (!session?.user) {
+      setAuthPermissions(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadPermissions() {
+      const { getSupabaseClient } = await import('./lib/supabase');
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!cancelled && userData?.user) {
+          setSession((prev) => (
+            prev?.user?.id === userData.user.id
+              ? { ...prev, user: userData.user }
+              : prev
+          ));
+        }
+      }
+
+      const token = await getSupabaseAccessToken();
+      if (!token || cancelled) return;
+      const permissions = await fetchSessionPermissions(token);
+      if (!cancelled) setAuthPermissions(permissions);
+    }
+
+    loadPermissions();
+    return () => { cancelled = true; };
+  }, [session?.user?.id, session?.access_token]);
+
+  useEffect(() => {
+    if (authLoading) return;
+
     const { slots, totalAtk } = buildLocalTeamComposition(team, savedConfigs, findCharacter);
     setTeamComposition(slots);
     setTeamTotalAtk(totalAtk);
@@ -250,6 +303,19 @@ export default function App() {
     if (!session?.user) return currentTeamId;
     return syncTeam(session.user.id, currentTeamId, nextTeam, configs);
   }, [session?.user]);
+
+  const syncTeamBeforeResults = useCallback(async () => {
+    if (!session?.user || !team.some(Boolean)) return teamId;
+    try {
+      const newTeamId = await syncTeam(session.user.id, teamId, team, savedConfigs);
+      setTeamId(newTeamId);
+      return newTeamId;
+    } catch (err) {
+      const message = err.message || 'Ошибка сохранения команды';
+      setActionError(`${message}. Расчёт доступен локально.`);
+      throw err;
+    }
+  }, [session?.user, teamId, team, savedConfigs]);
 
   const invalidateUserDataLoad = useCallback(() => {
     userDataLoadSeqRef.current += 1;
@@ -381,20 +447,36 @@ export default function App() {
     }
   }, []);
 
+  const handleSignInWithOAuth = useCallback(async (provider, countryCode) => {
+    setActionError(null);
+    setActionLoading(true);
+    try {
+      await signInWithOAuth(provider, countryCode);
+    } catch (err) {
+      setActionError(err.message || 'Ошибка OAuth');
+      setActionLoading(false);
+      throw err;
+    }
+  }, []);
+
   const handleSignOut = useCallback(async () => {
     setActionError(null);
+    hadAuthenticatedSessionRef.current = false;
+
+    const local = loadLocalState();
+    setSession(null);
+    setSavedConfigs(local.savedConfigs);
+    setTeam(local.team);
+    setTeamId(null);
+    setProfileDisplayName(null);
+    navigate('/', { replace: true });
+
     try {
       await signOut();
-      setSession(null);
-      const local = loadLocalState();
-      setSavedConfigs(local.savedConfigs);
-      setTeam(local.team);
-      setTeamId(null);
-      setProfileDisplayName(null);
     } catch (err) {
       setActionError(err.message || 'Ошибка выхода');
     }
-  }, []);
+  }, [navigate]);
 
   const handleUpdateDisplayName = useCallback(async (displayName) => {
     setActionError(null);
@@ -426,6 +508,7 @@ export default function App() {
     clearTeamSlot,
     getConfig,
     addToTeam,
+    syncTeamBeforeResults,
     session,
     isAuthenticated,
     authLoading,
@@ -434,9 +517,11 @@ export default function App() {
     actionError,
     actionLoading,
     profileDisplayName,
+    authPermissions,
     updateDisplayName: handleUpdateDisplayName,
     signIn: handleSignIn,
     signUp: handleSignUp,
+    signInWithOAuth: handleSignInWithOAuth,
     signOut: handleSignOut,
     clearActionError: () => setActionError(null),
   }), [
@@ -454,6 +539,7 @@ export default function App() {
     clearTeamSlot,
     getConfig,
     addToTeam,
+    syncTeamBeforeResults,
     session,
     isAuthenticated,
     authLoading,
@@ -462,9 +548,11 @@ export default function App() {
     actionError,
     actionLoading,
     profileDisplayName,
+    authPermissions,
     handleUpdateDisplayName,
     handleSignIn,
     handleSignUp,
+    handleSignInWithOAuth,
     handleSignOut,
   ]);
 
@@ -518,6 +606,7 @@ export default function App() {
           <Route path="/team" element={<TeamPage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:userId" element={<UserResultsPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
         </Routes>
       </main>
     </AppContext.Provider>

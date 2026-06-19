@@ -4,8 +4,8 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:web": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "node ./node_modules/vite/bin/vite.js",
     "dev:api": "node scripts/run-api.mjs",
     "dev:full": "node scripts/dev.mjs",
     "build": "vite build",
@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "generate:weapons": "node scripts/generate-weapons-catalog.mjs",
-    "generate:artifacts": "node scripts/generate-artifacts-catalog.mjs"
+    "generate:artifacts": "node scripts/generate-artifacts-catalog.mjs",
+    "optimize:background": "node scripts/optimize-background.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
+    "sharp": "^0.35.1",
     "tailwindcss": "^3.4.17",
     "vite": "^6.0.3",
     "vitest": "^3.0.5"

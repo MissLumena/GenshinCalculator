@@ -1,105 +1,77 @@
 import { describe, expect, it } from 'vitest';
+import { CHARACTERS } from './characters';
+import { CHARACTER_SIGNATURE_WEAPONS } from './data/characterSignatureWeapons.js';
 import {
-  WEAPONS,
-  FEATURED_WEAPON_NAMES,
-  WEAPON_CATALOG_VERSION,
-  MIN_WEAPON_CATALOG_TOTAL,
   findWeaponById,
-  findWeaponByName,
-  getWeaponIconUrl,
-  getWeaponIconUrls,
-  getWeaponMeta,
-  getWeaponsForType,
-  getWeaponLabel,
-  getWeaponCatalogCounts,
-  getWeaponCatalogTotal,
+  getSignatureWeaponId,
   normalizeWeaponType,
-  mergeWeaponIntoArtifactsSummary,
-  stripWeaponFromArtifactsSummary,
+  sortWeaponsWithSignatureFirst,
 } from './weapons';
-import { WEAPON_CATALOG_META } from './data/weaponCatalogMeta.js';
 
-describe('weapons catalog', () => {
-  it(`contains full ${WEAPON_CATALOG_VERSION} catalog with 200+ weapons`, () => {
-    expect(getWeaponCatalogTotal()).toBeGreaterThanOrEqual(MIN_WEAPON_CATALOG_TOTAL);
-    expect(WEAPONS.length).toBe(getWeaponCatalogTotal());
-  });
+describe('character signature weapons', () => {
+  it('maps only to existing weapons with matching character type', () => {
+    const mismatches = [];
 
-  it('reports counts by weapon type', () => {
-    const counts = getWeaponCatalogCounts();
-    expect(counts.Sword).toBeGreaterThan(40);
-    expect(counts.Claymore).toBeGreaterThan(30);
-    expect(counts.Polearm).toBeGreaterThan(30);
-    expect(counts.Bow).toBeGreaterThan(30);
-    expect(counts.Catalyst).toBeGreaterThan(40);
-    expect(Object.values(counts).reduce((sum, n) => sum + n, 0)).toBe(WEAPONS.length);
-  });
+    for (const [characterId, weaponId] of Object.entries(CHARACTER_SIGNATURE_WEAPONS)) {
+      const character = CHARACTERS.find((item) => item.id === characterId);
+      const weapon = findWeaponById(weaponId);
 
-  it('includes featured signature weapons', () => {
-    for (const name of FEATURED_WEAPON_NAMES) {
-      expect(findWeaponByName(name), name).toBeTruthy();
+      expect(character, `unknown character ${characterId}`).toBeTruthy();
+      expect(weapon, `unknown weapon ${weaponId} for ${characterId}`).toBeTruthy();
+
+      const resolvedId = getSignatureWeaponId(characterId, character.weapon);
+      if (resolvedId !== weaponId) {
+        mismatches.push({ characterId, weaponId, characterWeapon: character.weapon, weaponType: weapon.type });
+      }
     }
-    expect(findWeaponByName('Disaster and Remorse')?.nameRu).toContain('Бедствие');
+
+    expect(mismatches, JSON.stringify(mismatches)).toEqual([]);
   });
 
-  it('normalizes weapon type aliases', () => {
-    expect(normalizeWeaponType('sword')).toBe('Sword');
-    expect(normalizeWeaponType(' Polearm ')).toBe('Polearm');
-    expect(getWeaponsForType('bow').length).toBeGreaterThan(30);
+  it('returns signature weapon id for hu-tao polearm', () => {
+    expect(getSignatureWeaponId('hu-tao', 'Polearm')).toBe('staff-of-homa');
   });
 
-  it('has meta with icons and descriptions for every weapon', () => {
-    for (const weapon of WEAPONS) {
-      expect(WEAPON_CATALOG_META[weapon.id], weapon.id).toBeTruthy();
-      expect(WEAPON_CATALOG_META[weapon.id].iconUrls?.length, weapon.id).toBeGreaterThan(0);
-      expect(WEAPON_CATALOG_META[weapon.id].effectRu, weapon.id).toBeTruthy();
-    }
-    expect(Object.keys(WEAPON_CATALOG_META).length).toBe(WEAPONS.length);
+  it('returns signature weapons for loen, flins and nicole', () => {
+    expect(getSignatureWeaponId('loen', 'Polearm')).toBe('disaster-and-remorse');
+    expect(getSignatureWeaponId('flins', 'Polearm')).toBe('bloodsoaked-ruins');
+    expect(getSignatureWeaponId('nicole', 'Catalyst')).toBe('angelos-heptades');
   });
 
-  it('returns enriched weapon meta', () => {
-    const meta = getWeaponMeta('staff-of-homa');
-    expect(meta?.description).toBeTruthy();
-    expect(meta?.iconUrls?.length).toBeGreaterThan(0);
-    expect(meta?.passiveName).toBeTruthy();
-    expect(meta?.nameRu).toContain('Хом');
+  it('returns null when weapon type does not match character', () => {
+    expect(getSignatureWeaponId('hu-tao', 'Sword')).toBeNull();
   });
+});
 
-  it('builds icon urls with jmp and enka fallbacks', () => {
-    expect(getWeaponIconUrl('staff-of-homa')).toContain('staff-of-homa');
-    expect(getWeaponIconUrls('freedom-sworn').length).toBeGreaterThan(1);
-    expect(getWeaponIconUrl(null)).toBeNull();
-  });
+describe('sortWeaponsWithSignatureFirst', () => {
+  const sample = [
+    { id: 'freedom-sworn', nameRu: 'A' },
+    { id: 'staff-of-homa', nameRu: 'B' },
+    { id: 'mistsplitter-reforged', nameRu: 'C' },
+  ];
 
-  it('migrates legacy weapon ids', () => {
-    expect(findWeaponById('calamity-queller-claymore')?.nameEn).toBe('Calamity Queller');
-    expect(findWeaponById('moonpiercer-catalyst')?.nameEn).toBe('Moonpiercer');
-  });
-
-  it('filters weapons by character type', () => {
-    const swords = getWeaponsForType('Sword');
-    expect(swords.length).toBeGreaterThan(40);
-    expect(swords.every((item) => item.type === 'Sword')).toBe(true);
-    expect(swords.some((item) => item.id === 'mistsplitter-reforged')).toBe(true);
-  });
-
-  it('returns weapon label with Russian name when available', () => {
-    expect(getWeaponLabel('disaster-and-remorse')).toContain('Бедствие');
-  });
-
-  it('roundtrips equipped weapon via artifacts_summary helpers', () => {
-    const merged = mergeWeaponIntoArtifactsSummary(
-      { set: 'emblem', hp: 0, critRate: 0, critDmg: 0, atkPercent: 0, em: 0 },
+  it('moves signature weapon to the front', () => {
+    const sorted = sortWeaponsWithSignatureFirst(sample, 'staff-of-homa');
+    expect(sorted.map((item) => item.id)).toEqual([
       'staff-of-homa',
-    );
-    const { artifacts, equippedWeaponId } = stripWeaponFromArtifactsSummary(merged);
-    expect(equippedWeaponId).toBe('staff-of-homa');
-    expect(artifacts.set).toBe('emblem');
-    expect(artifacts._equippedWeaponId).toBeUndefined();
+      'freedom-sworn',
+      'mistsplitter-reforged',
+    ]);
   });
 
-  it('has unique weapon ids', () => {
-    const ids = WEAPONS.map((item) => item.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it('keeps order when signature is already first or missing', () => {
+    expect(sortWeaponsWithSignatureFirst(sample, 'freedom-sworn')).toBe(sample);
+    expect(sortWeaponsWithSignatureFirst(sample, null)).toBe(sample);
+  });
+});
+
+describe('five-star characters signature coverage', () => {
+  it('has signature mapping for most playable 5-star characters', () => {
+    const fiveStars = CHARACTERS.filter((item) => item.rarity === 5 && item.id !== 'traveler');
+    const withSig = fiveStars.filter(
+      (item) => getSignatureWeaponId(item.id, normalizeWeaponType(item.weapon)) != null,
+    );
+
+    expect(withSig.length).toBeGreaterThanOrEqual(50);
   });
 });

@@ -89,8 +89,16 @@ class NotionClient:
                 raise NotionApiError(404, 'База Notion не найдена или интеграция не подключена')
 
             if response.status_code == 400:
-                logger.error('Notion 400: property type mismatch')
-                raise NotionApiError(400, 'Некорректные данные для Notion')
+                detail = 'Некорректные данные для Notion'
+                try:
+                    payload = response.json()
+                    notion_message = payload.get('message')
+                    if isinstance(notion_message, str) and notion_message.strip():
+                        detail = notion_message.strip()
+                except ValueError:
+                    pass
+                logger.error('Notion 400 on %s: %s', path, detail)
+                raise NotionApiError(400, detail)
 
             if response.status_code >= 400:
                 detail = 'Ошибка Notion API'
