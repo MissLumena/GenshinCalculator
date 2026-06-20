@@ -167,17 +167,32 @@ describe('notionService', () => {
     vi.unstubAllGlobals();
   });
 
-  it('fetchNotionResults surfaces backend 500 as server error', async () => {
+  it('fetchNotionResults surfaces proxy 500 without body as API unavailable', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
       headers: { get: () => 'text/plain' },
-      text: async () => 'Internal Server Error',
+      text: async () => '',
     });
     vi.stubGlobal('fetch', fetchMock);
 
     const { fetchNotionResults } = await import('./notionService');
-    await expect(fetchNotionResults('token-abc')).rejects.toThrow(/Internal Server Error|HTTP 500/i);
+    await expect(fetchNotionResults('token-abc')).rejects.toThrow(/API недоступен/i);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetchNotionResults surfaces backend 500 with detail', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ detail: 'Internal Server Error' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { fetchNotionResults } = await import('./notionService');
+    await expect(fetchNotionResults('token-abc')).rejects.toThrow(/Internal Server Error/i);
 
     vi.unstubAllGlobals();
   });

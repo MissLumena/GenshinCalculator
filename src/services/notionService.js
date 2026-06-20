@@ -65,6 +65,11 @@ async function parseJsonResponse(response) {
         'Backend перезапускается. Подождите несколько секунд и обновите страницу.',
       );
     }
+    if (response.status === 500 && !data?.detail) {
+      throw new Error(
+        'API недоступен. Запустите backend: npm run dev:api (или npm run dev).',
+      );
+    }
     if (response.status === 401) {
       throw new Error('Сессия истекла. Выйдите из аккаунта и войдите снова.');
     }
