@@ -74,8 +74,7 @@ htmlcov/
 .coverage
 .pytest_cache/
 
-# Lock-файлы (если не используете в репозитории)
-package-lock.json
+# Lock-файлы (yarn не используем; package-lock.json нужен для CI)
 yarn.lock
 
 # ESLint / Prettier (если локальные, не общие)
