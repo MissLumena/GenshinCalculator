@@ -49,5 +49,7 @@ function run(command, args) {
 }
 
 loadEnvFromPaste();
-console.log('[deploy] npx wrangler deploy (build via wrangler.jsonc)');
-run('npx', ['wrangler', 'deploy']);
+console.log('[deploy] build + Cloudflare Pages (не Workers — стабильнее upload)');
+run('node', ['scripts/cloudflare-build.mjs']);
+console.log('[deploy] npx wrangler pages deploy dist');
+run('npx', ['wrangler', 'pages', 'deploy', 'dist', '--project-name=genshin-calculator', '--branch=main', '--commit-dirty=true']);

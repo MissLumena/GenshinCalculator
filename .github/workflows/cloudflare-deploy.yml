@@ -48,9 +48,12 @@ jobs:
           fi
           npx wrangler whoami
 
-      - name: Deploy to Cloudflare Workers
+      - name: Build frontend
+        run: node scripts/cloudflare-build.mjs
+
+      - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 63d3b1a7291d3b38f203cf7f0c42a9f5
-          command: deploy
+          command: pages deploy dist --project-name=genshin-calculator --branch=main
