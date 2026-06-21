@@ -1,0 +1,40 @@
+name: Deploy Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/cloudflare-*.mjs'
+      - 'cloudflare-worker.mjs'
+      - 'wrangler.jsonc'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.js'
+      - 'index.html'
+      - '.github/workflows/cloudflare-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 63d3b1a7291d3b38f203cf7f0c42a9f5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
