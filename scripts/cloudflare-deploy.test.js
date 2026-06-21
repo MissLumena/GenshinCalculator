@@ -10,8 +10,8 @@ describe('cloudflare deploy config', () => {
     expect(raw).toContain('scripts/cloudflare-build.mjs');
   });
 
-  it('cloudflare-env-paste has Supabase vars for build', () => {
-    const raw = readFileSync(join(process.cwd(), 'deploy', 'cloudflare-env-paste.txt'), 'utf8');
+  it('cloudflare-build.env has Supabase vars for build', () => {
+    const raw = readFileSync(join(process.cwd(), 'deploy', 'cloudflare-build.env'), 'utf8');
     expect(raw).toMatch(/SUPABASE_URL=https:\/\/.+\.supabase\.co/);
     expect(raw).toContain('SUPABASE_ANON_KEY=');
   });
