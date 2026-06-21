@@ -37,7 +37,7 @@ def test_build_authorize_url_contains_pkce_and_openid_scope() -> None:
         state='state-token',
         code_challenge='challenge-value',
     )
-    assert 'oauth.mail.ru/login' in url
+    assert 'o2.mail.ru/login' in url
     assert 'client_id=abc' in url
     assert 'response_type=code' in url
     assert 'scope=openid+email' in url

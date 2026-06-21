@@ -1,4 +1,4 @@
-"""OAuth Mail.ru через backend (без провайдера в Supabase Dashboard)."""
+"""OAuth Mail.ru через backend (VK ID или legacy oauth.mail.ru)."""
 
 from __future__ import annotations
 
@@ -15,12 +15,19 @@ from jose import JWTError, jwt
 from app.config import Settings, get_settings
 from app.mailru_oauth import (
     MailRuOAuthConfig,
-    build_authorize_url,
-    exchange_code_for_token,
-    fetch_user_info,
+    MailRuUserInfo,
+    build_authorize_url as build_legacy_authorize_url,
+    exchange_code_for_token as exchange_legacy_code_for_token,
+    fetch_user_info as fetch_legacy_user_info,
     generate_pkce_pair,
 )
 from app.supabase_admin import create_magic_link_token_hash, is_supabase_admin_configured
+from app.vkid_oauth import (
+    VkIdOAuthConfig,
+    build_mail_authorize_url,
+    exchange_code_for_token as exchange_vkid_code_for_token,
+    fetch_user_info as fetch_vkid_user_info,
+)
 
 logger = logging.getLogger('genshin_api')
 
@@ -28,12 +35,13 @@ router = APIRouter(prefix='/auth/mailru', tags=['Auth'])
 
 
 @router.get('/status')
-def mailru_oauth_status(settings: Settings = Depends(get_settings)) -> dict[str, bool]:
+def mailru_oauth_status(settings: Settings = Depends(get_settings)) -> dict[str, bool | str]:
     """Публичная проверка: настроен ли OAuth Mail.ru на сервере."""
-    mailru_ready = bool(settings.mailru_client_id and settings.mailru_client_secret)
+    oauth_ready = settings.mail_oauth_configured
     return {
-        'configured': mailru_ready and is_supabase_admin_configured(settings),
-        'mailru': mailru_ready,
+        'configured': oauth_ready and is_supabase_admin_configured(settings),
+        'engine': settings.mail_oauth_engine,
+        'mailru': oauth_ready,
         'supabase_admin': is_supabase_admin_configured(settings),
     }
 
@@ -113,22 +121,85 @@ def _decode_state(settings: Settings, state: str) -> str:
     return origin
 
 
-def _require_mailru_config(settings: Settings) -> MailRuOAuthConfig:
-    if not settings.mailru_client_id or not settings.mailru_client_secret:
-        raise HTTPException(
-            status_code=503,
-            detail='Mail.ru OAuth не настроен. Задайте MAILRU_CLIENT_ID и MAILRU_CLIENT_SECRET.',
-        )
+def _require_oauth_config(settings: Settings) -> tuple[str, MailRuOAuthConfig | VkIdOAuthConfig]:
     if not is_supabase_admin_configured(settings):
         raise HTTPException(
             status_code=503,
             detail='Задайте SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY для входа через Mail.ru.',
         )
-    return MailRuOAuthConfig(
+
+    redirect_uri = _mailru_redirect_uri(settings)
+    if settings.mail_oauth_engine == 'vkid':
+        if not settings.vk_id_client_id or not settings.vk_id_service_token:
+            raise HTTPException(
+                status_code=503,
+                detail='VK ID OAuth не настроен. Задайте VK_ID_CLIENT_ID и VK_ID_SERVICE_TOKEN.',
+            )
+        return 'vkid', VkIdOAuthConfig(
+            client_id=settings.vk_id_client_id,
+            service_token=settings.vk_id_service_token,
+            redirect_uri=redirect_uri,
+        )
+
+    if not settings.mailru_client_id or not settings.mailru_client_secret:
+        raise HTTPException(
+            status_code=503,
+            detail='Mail.ru OAuth не настроен. Задайте MAILRU_CLIENT_ID и MAILRU_CLIENT_SECRET.',
+        )
+    return 'mailru', MailRuOAuthConfig(
         client_id=settings.mailru_client_id,
         client_secret=settings.mailru_client_secret,
-        redirect_uri='',
+        redirect_uri=redirect_uri,
     )
+
+
+def _build_authorize_url(
+    engine: str,
+    config: MailRuOAuthConfig | VkIdOAuthConfig,
+    *,
+    state: str,
+    code_challenge: str,
+) -> str:
+    if engine == 'vkid':
+        assert isinstance(config, VkIdOAuthConfig)
+        return build_mail_authorize_url(
+            config,
+            state=state,
+            code_challenge=code_challenge,
+        )
+    assert isinstance(config, MailRuOAuthConfig)
+    return build_legacy_authorize_url(
+        config,
+        state=state,
+        code_challenge=code_challenge,
+    )
+
+
+def _complete_oauth_login(
+    engine: str,
+    config: MailRuOAuthConfig | VkIdOAuthConfig,
+    *,
+    code: str,
+    code_verifier: str,
+    state: str,
+    device_id: str | None,
+) -> MailRuUserInfo:
+    if engine == 'vkid':
+        assert isinstance(config, VkIdOAuthConfig)
+        if not device_id:
+            raise ValueError('Отсутствует device_id от VK ID')
+        access_token = exchange_vkid_code_for_token(
+            config,
+            code,
+            code_verifier=code_verifier,
+            device_id=device_id,
+            state=state,
+        )
+        return fetch_vkid_user_info(config, access_token)
+
+    assert isinstance(config, MailRuOAuthConfig)
+    access_token = exchange_legacy_code_for_token(config, code, code_verifier=code_verifier)
+    return fetch_legacy_user_info(access_token)
 
 
 @router.get('/start')
@@ -157,13 +228,7 @@ async def start_mailru_oauth(
     recent_hits.append(now)
     rate_store[client_ip] = recent_hits
 
-    config_base = _require_mailru_config(settings)
-    redirect_uri = _mailru_redirect_uri(settings)
-    config = MailRuOAuthConfig(
-        client_id=config_base.client_id,
-        client_secret=config_base.client_secret,
-        redirect_uri=redirect_uri,
-    )
+    engine, config = _require_oauth_config(settings)
 
     pkce = generate_pkce_pair()
     state = _encode_state(
@@ -171,7 +236,8 @@ async def start_mailru_oauth(
         frontend_origin=frontend_origin,
         code_verifier=pkce.code_verifier,
     )
-    authorize_url = build_authorize_url(
+    authorize_url = _build_authorize_url(
+        engine,
         config,
         state=state,
         code_challenge=pkce.code_challenge,
@@ -184,6 +250,7 @@ async def mailru_oauth_callback(
     request: Request,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
+    device_id: str | None = Query(default=None),
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -227,16 +294,15 @@ async def mailru_oauth_callback(
 
     try:
         frontend_origin, code_verifier = _decode_state_payload(settings, state)
-        config_base = _require_mailru_config(settings)
-        redirect_uri = _mailru_redirect_uri(settings)
-        config = MailRuOAuthConfig(
-            client_id=config_base.client_id,
-            client_secret=config_base.client_secret,
-            redirect_uri=redirect_uri,
+        engine, config = _require_oauth_config(settings)
+        user_info = _complete_oauth_login(
+            engine,
+            config,
+            code=code,
+            code_verifier=code_verifier,
+            state=state,
+            device_id=device_id,
         )
-
-        access_token = exchange_code_for_token(config, code, code_verifier=code_verifier)
-        user_info = fetch_user_info(access_token)
         auth_redirect = f'{frontend_origin}/auth/callback'
         token_hash = create_magic_link_token_hash(
             settings,

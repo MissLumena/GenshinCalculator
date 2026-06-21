@@ -40,8 +40,13 @@ class Settings(BaseSettings):
 
     mailru_client_id: str = ''
     mailru_client_secret: str = ''
-    # Должен совпадать с redirect URI в oauth.mail.ru (localhost ≠ 127.0.0.1)
+    # Должен совпадать с redirect URI в oauth.mail.ru / VK ID (localhost ≠ 127.0.0.1)
     mailru_redirect_uri: str = ''
+
+    # VK ID (id.vk.com) — рекомендуемый вход через Mail.ru: provider=mail_ru
+    # Если задан VK_ID_CLIENT_ID, используется VK ID вместо oauth.mail.ru
+    vk_id_client_id: str = ''
+    vk_id_service_token: str = ''
 
     notion_secret: str = ''
     notion_database_id: str = ''
@@ -84,6 +89,18 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
+
+    @property
+    def mail_oauth_engine(self) -> str:
+        if self.vk_id_client_id.strip():
+            return 'vkid'
+        return 'mailru'
+
+    @property
+    def mail_oauth_configured(self) -> bool:
+        if self.mail_oauth_engine == 'vkid':
+            return bool(self.vk_id_client_id.strip() and self.vk_id_service_token.strip())
+        return bool(self.mailru_client_id.strip() and self.mailru_client_secret.strip())
 
     @property
     def resolved_mailru_redirect_uri(self) -> str:

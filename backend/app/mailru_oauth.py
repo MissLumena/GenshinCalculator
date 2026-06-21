@@ -13,8 +13,9 @@ import httpx
 
 logger = logging.getLogger('genshin_api')
 
-MAILRU_AUTHORIZE_URL = 'https://oauth.mail.ru/login'
-MAILRU_TOKEN_URL = 'https://oauth.mail.ru/token'
+# o2.mail.ru — актуальные эндпоинты для приложений из https://o2.mail.ru/app/
+MAILRU_AUTHORIZE_URL = 'https://o2.mail.ru/login'
+MAILRU_TOKEN_URL = 'https://o2.mail.ru/token'
 MAILRU_USERINFO_URL = 'https://oauth.mail.ru/api/v1/oidc/userinfo'
 MAILRU_SCOPE = 'openid email'
 
