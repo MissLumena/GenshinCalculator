@@ -3,6 +3,12 @@
   "name": "genshin-calculator",
   "main": "cloudflare-worker.mjs",
   "compatibility_date": "2026-06-20",
+  "vars": {
+    "API_ORIGIN": "https://genshincalculator-l6rw.onrender.com"
+  },
+  "build": {
+    "command": "node scripts/cloudflare-build.mjs"
+  },
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",

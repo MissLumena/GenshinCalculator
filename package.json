@@ -15,7 +15,8 @@
     "test:e2e:ui": "playwright test --ui",
     "generate:weapons": "node scripts/generate-weapons-catalog.mjs",
     "generate:artifacts": "node scripts/generate-artifacts-catalog.mjs",
-    "optimize:background": "node scripts/optimize-background.mjs"
+    "optimize:background": "node scripts/optimize-background.mjs",
+    "deploy:cloudflare": "node scripts/cloudflare-deploy.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
