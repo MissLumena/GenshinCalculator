@@ -16,6 +16,7 @@ yarn-error.log*
 # IDE и ОС
 .idea/
 .vscode/
+.cursor/
 *.sublime-workspace
 .DS_Store
 Thumbs.db
@@ -26,6 +27,9 @@ Thumbs.db
 .eslintcache
 
 # ─── Секреты и переменные окружения (не коммитить!) ───
+deploy/production-secrets.env
+deploy/render-env-paste.txt
+deploy/cloudflare-api-token.env
 .env
 .env.*
 !.env.example
@@ -91,3 +95,7 @@ playwright-report/
 test-results/
 blob-report/
 playwright/.cache/
+
+# Временные и сгенерированные артефакты (не коммитить)
+backend/tmp*.json
+src/data/talentLevelLimitsReport.json

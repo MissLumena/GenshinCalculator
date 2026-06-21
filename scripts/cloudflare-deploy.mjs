@@ -9,9 +9,15 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const envFile = join(root, 'deploy', 'cloudflare-env-paste.txt');
+const tokenFile = join(root, 'deploy', 'cloudflare-api-token.env');
 
-function loadEnvFromPaste() {
-  const text = readFileSync(envFile, 'utf8');
+function loadEnvFile(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return;
+  }
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -19,10 +25,15 @@ function loadEnvFromPaste() {
     if (idx === -1) continue;
     const key = trimmed.slice(0, idx).trim();
     const value = trimmed.slice(idx + 1).trim();
-    if (key && !(key in process.env)) {
+    if (key && value && !(key in process.env)) {
       process.env[key] = value;
     }
   }
+}
+
+function loadEnvFromPaste() {
+  loadEnvFile(envFile);
+  loadEnvFile(tokenFile);
 }
 
 function run(command, args) {
@@ -38,7 +49,5 @@ function run(command, args) {
 }
 
 loadEnvFromPaste();
-console.log('[deploy] npm run build');
-run('npm', ['run', 'build']);
-console.log('[deploy] npx wrangler deploy');
+console.log('[deploy] npx wrangler deploy (build via wrangler.jsonc)');
 run('npx', ['wrangler', 'deploy']);
