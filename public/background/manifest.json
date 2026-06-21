@@ -1,0 +1,46 @@
+{
+  "generatedAt": "2026-06-18T17:58:51.263Z",
+  "source": {
+    "path": "windrise-source.jpg",
+    "width": 1024,
+    "height": 768,
+    "format": "jpeg"
+  },
+  "variants": [
+    {
+      "file": "windrise-1280.jpg",
+      "width": 1280,
+      "height": 960,
+      "bytes": 271626
+    },
+    {
+      "file": "windrise-1920.jpg",
+      "width": 1920,
+      "height": 1440,
+      "bytes": 494834
+    },
+    {
+      "file": "windrise-2560.jpg",
+      "width": 2560,
+      "height": 1920,
+      "bytes": 759939
+    },
+    {
+      "file": "windrise-1920.webp",
+      "width": 1920,
+      "height": 1440,
+      "bytes": 331508
+    },
+    {
+      "file": "windrise-2560.webp",
+      "width": 2560,
+      "height": 1920,
+      "bytes": 490604
+    }
+  ],
+  "recommended": {
+    "default": "windrise-1920.webp",
+    "fallback": "windrise-1920.jpg",
+    "retina": "windrise-2560.webp"
+  }
+}
