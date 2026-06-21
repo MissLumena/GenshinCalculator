@@ -1,0 +1,22 @@
+# Render Blueprint — backend FastAPI (бесплатный tier).
+# Dashboard → New → Blueprint → подключить репозиторий.
+# Секреты задайте в Render Dashboard после создания сервиса.
+
+services:
+  - type: web
+    name: genshin-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_PORT
+        value: "10000"
+      - key: NOTION_STARTUP_CHECK
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.12.0"

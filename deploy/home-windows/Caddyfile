@@ -1,0 +1,19 @@
+# Caddy: HTTPS + фронт + прокси /api → FastAPI на домашнем ПК (Windows).
+# 1) Установите Caddy: https://caddyserver.com/download
+# 2) Замените YOUR_HOST и пути ниже
+# 3) Запуск из папки проекта:
+#    caddy run --config deploy/home-windows/Caddyfile
+
+YOUR_HOST {
+	root * C:/Users/Мира/Documents/GenshinСalculator/dist
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8010
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
