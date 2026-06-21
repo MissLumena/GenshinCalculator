@@ -51,9 +51,15 @@ jobs:
       - name: Build frontend
         run: node scripts/cloudflare-build.mjs
 
+      - name: Ensure Cloudflare Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx wrangler pages project create genshin-calculator --production-branch=main || true
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 63d3b1a7291d3b38f203cf7f0c42a9f5
-          command: pages deploy dist --project-name=genshin-calculator --branch=main
+          command: pages deploy dist --project-name=genshin-calculator --branch=main --commit-dirty=true
