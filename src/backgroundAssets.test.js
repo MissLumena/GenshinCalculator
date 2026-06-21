@@ -25,6 +25,14 @@ describe('background assets', () => {
     expect(hd.height).toBeGreaterThanOrEqual(1080);
   });
 
+  it('routes /api through Pages Functions only', () => {
+    const routes = JSON.parse(
+      fs.readFileSync(path.join(root, 'public/_routes.json'), 'utf8'),
+    );
+    expect(routes.include).toContain('/api/*');
+    expect(fs.existsSync(path.join(root, 'functions/api/[[path]].js'))).toBe(true);
+  });
+
   it('applies evening dim and sky-only sunset without blur', () => {
     const css = fs.readFileSync(path.join(root, 'src/index.css'), 'utf8');
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');

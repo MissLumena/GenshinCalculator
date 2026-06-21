@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'public/**'
+      - 'functions/**'
       - 'scripts/cloudflare-*.mjs'
       - 'cloudflare-worker.mjs'
       - 'wrangler.jsonc'

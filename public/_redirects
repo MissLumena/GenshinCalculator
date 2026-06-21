@@ -1,3 +1,2 @@
-# Для Cloudflare Pages (если появится): прокси /api → Render.
-# При деплое через Worker используется cloudflare-worker.mjs и переменная API_ORIGIN.
-/api/*  https://genshincalculator-l6rw.onrender.com/api/:splat  200
+# /api/* проксируется через functions/api/[[path]].js (Pages Functions).
+# _redirects не поддерживает внешние URL на Cloudflare Pages.
