@@ -1,3 +1,3 @@
-# Cloudflare Pages: прокси /api → Render backend.
-# Замените YOUR-RENDER-URL на адрес сервиса, например genshin-api.onrender.com
-/api/*  https://https://genshincalculator-l6rw.onrender.com 
+# Для Cloudflare Pages (если появится): прокси /api → Render.
+# При деплое через Worker используется cloudflare-worker.mjs и переменная API_ORIGIN.
+/api/*  https://genshincalculator-l6rw.onrender.com/api/:splat  200
