@@ -1169,14 +1169,7 @@ export function Header() {
                 >
                   {authMode === 'signin' ? 'Войти через Google' : 'Регистрация через Google'}
                 </button>
-                <button
-                  type="button"
-                  disabled={actionLoading || authCountryLoading}
-                  onClick={() => handleOAuthClick('apple')}
-                  className="btn-pill-ghost w-full disabled:opacity-50"
-                >
-                  {authMode === 'signin' ? 'Войти через Apple' : 'Регистрация через Apple'}
-                </button>
+                
               </>
             ) : null}
             {authCountryLoading ? (
