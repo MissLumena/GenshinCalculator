@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { captureAppError } from './sentry';
 
 export class ErrorBoundary extends Component {
   constructor(props) {
@@ -12,6 +13,7 @@ export class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     console.error('App render error:', error, info);
+    captureAppError(error, info);
   }
 
   render() {

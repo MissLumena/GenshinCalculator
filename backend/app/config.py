@@ -28,6 +28,10 @@ class Settings(BaseSettings):
 
     cors_origins: str = 'http://localhost:5173'
 
+    sentry_dsn: str = ''
+    sentry_environment: str = ''
+    sentry_traces_sample_rate: float = 0.1
+
     jwt_secret: str
     jwt_algorithm: str = 'HS256'
     jwt_expire_minutes: int = 60 * 24 * 7

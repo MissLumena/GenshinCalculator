@@ -23,9 +23,11 @@ from app.routers import (
     session,
     teams,
 )
+from app.sentry import init_sentry
 
 logger = logging.getLogger('genshin_api')
 settings = get_settings()
+init_sentry(settings)
 static_dir = Path(__file__).resolve().parent.parent / 'static'
 
 

@@ -1179,7 +1179,7 @@ export function Header() {
             ) : null}
             {!oauthAllowed && !authCountryLoading ? (
               <p className="rounded border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/75">
-                Google и Apple недоступны из России. Используйте email, пароль или Mail.ru.
+                Google недоступен из России. Используйте email, пароль или Mail.ru.
               </p>
             ) : null}
           </div>
