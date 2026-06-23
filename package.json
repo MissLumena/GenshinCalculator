@@ -16,6 +16,7 @@
     "generate:weapons": "node scripts/generate-weapons-catalog.mjs",
     "generate:artifacts": "node scripts/generate-artifacts-catalog.mjs",
     "optimize:background": "node scripts/optimize-background.mjs",
+    "generate:favicon": "node scripts/generate-favicon.mjs",
     "deploy:cloudflare": "node scripts/cloudflare-deploy.mjs"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "@playwright/test": "^1.61.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "png-to-ico": "^3.0.1",
     "postcss": "^8.4.49",
     "sharp": "^0.35.1",
     "tailwindcss": "^3.4.17",

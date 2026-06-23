@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import logging
 
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.logging import LoggingIntegration
-
 from app.config import Settings
+
+logger = logging.getLogger('genshin_api')
 
 
 def _clamp_sample_rate(value: float) -> float:
@@ -19,6 +17,17 @@ def init_sentry(settings: Settings) -> bool:
     """Инициализирует Sentry, если задан DSN."""
     dsn = settings.sentry_dsn.strip()
     if not dsn:
+        return False
+
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+    except ImportError:
+        logger.warning(
+            'SENTRY_DSN задан, но пакет sentry-sdk не установлен. '
+            'Выполните: pip install -r requirements.txt',
+        )
         return False
 
     environment = settings.sentry_environment.strip()
