@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /auth/
+Disallow: /api/
+
+Sitemap: https://genshin-calculator-2ow.pages.dev/sitemap.xml

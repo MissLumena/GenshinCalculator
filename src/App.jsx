@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Header } from './components';
+import { SeoManager } from './components/SeoManager';
 import { AppContext } from './context';
 import {
   HomePage,
@@ -558,6 +559,7 @@ export default function App() {
 
   return (
     <AppContext.Provider value={value}>
+      <SeoManager />
       <Header />
       {catalogLoading && (
         <div className="glass-banner border-genshin-gold/40 text-white">

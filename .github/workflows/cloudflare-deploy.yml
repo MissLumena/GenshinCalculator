@@ -29,6 +29,7 @@ jobs:
       VITE_SUPABASE_URL: https://midbzlmbssalgsmcjmmw.supabase.co
       VITE_SUPABASE_ANON_KEY: sb_publishable_xwImfM2rB4fjzM5pUFSnJg_okkHRWCg
       VITE_SUPERUSER_EMAILS: kondratovic91@mail.ru
+      VITE_SITE_URL: https://genshin-calculator-2ow.pages.dev
 
     steps:
       - uses: actions/checkout@v4

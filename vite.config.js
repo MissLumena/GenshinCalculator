@@ -18,6 +18,27 @@ function readApiPort() {
 }
 
 const apiPort = readApiPort();
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+const defaultSiteUrl = 'https://genshin-calculator-2ow.pages.dev';
+
+if (!process.env.VITE_SITE_URL) {
+  try {
+    const buildEnv = fs.readFileSync(
+      path.join(projectRoot, 'deploy', 'cloudflare-build.env'),
+      'utf8',
+    );
+    const match = buildEnv.match(/^VITE_SITE_URL=(.+)$/m);
+    if (match?.[1]?.trim()) {
+      process.env.VITE_SITE_URL = match[1].trim();
+    }
+  } catch {
+    // optional deploy env file
+  }
+}
+
+if (!process.env.VITE_SITE_URL) {
+  process.env.VITE_SITE_URL = defaultSiteUrl;
+}
 
 export default defineConfig({
   plugins: [react()],
